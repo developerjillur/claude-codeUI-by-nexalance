@@ -59,7 +59,7 @@ We extend our sincere gratitude to Andre Pimenta for creating the original exten
 ## Chat Interface
 
 <p align="center">
-  <img src="assets/screenshots/chatbox.png" alt="Claude CodeUI Chat Interface" width="800">
+  <img src="assets/screenshots/ChatBox-v2.png" alt="Claude CodeUI Chat Interface" width="800">
 </p>
 
 The beautiful chat interface features:
