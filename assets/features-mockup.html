@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude CodeUI Features</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #fff 0%, #d97706 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .tagline {
+            font-size: 18px;
+            color: #a0aec0;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin: 30px 0;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 36px;
+            font-weight: 700;
+            color: #d97706;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #a0aec0;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-top: 40px;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 28px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(217, 119, 6, 0.5);
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+
+        .feature-icon.blue { background: linear-gradient(135deg, #0ea5e9, #0284c7); }
+        .feature-icon.purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .feature-icon.green { background: linear-gradient(135deg, #10b981, #059669); }
+        .feature-icon.orange { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .feature-icon.pink { background: linear-gradient(135deg, #ec4899, #db2777); }
+        .feature-icon.cyan { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+
+        .feature-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .feature-desc {
+            font-size: 14px;
+            color: #a0aec0;
+            line-height: 1.6;
+        }
+
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 13px;
+            color: #e2e8f0;
+        }
+
+        .badge.highlight {
+            background: linear-gradient(135deg, #d97706, #b45309);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-container">
+                <img src="../icon.png" alt="Claude CodeUI" class="logo">
+            </div>
+            <h1>Claude CodeUI by NexaLance</h1>
+            <p class="tagline">Enterprise-grade VS Code extension for Claude Code CLI with intelligent memory, checkpoints, and context management</p>
+
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value">30K+</div>
+                    <div class="stat-label">Lines of Code</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">8</div>
+                    <div class="stat-label">Manager Systems</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">50+</div>
+                    <div class="stat-label">TypeScript Interfaces</div>
+                </div>
+            </div>
+
+            <div class="badges">
+                <span class="badge highlight">v2.2.0</span>
+                <span class="badge">TypeScript 5.8</span>
+                <span class="badge">VS Code 1.94+</span>
+                <span class="badge">Zero Dependencies</span>
+                <span class="badge">MIT License</span>
+            </div>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon blue">🧠</div>
+                <div class="feature-title">Project Memory</div>
+                <div class="feature-desc">Knowledge graph with O(1) inverted index search. 11 entity types. Auto-injection of relevant context.</div>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon purple">💾</div>
+                <div class="feature-title">Smart Checkpoints</div>
+                <div class="feature-desc">SHA-256 hashing for 20,000+ files. One-click restore with preview. Git-based storage.</div>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon green">📊</div>
+                <div class="feature-title">Context Management</div>
+                <div class="feature-desc">Auto-compression at 90% usage. Token tracking. Priority-based preservation.</div>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon orange">🔍</div>
+                <div class="feature-title">Self-Verification</div>
+                <div class="feature-desc">Response validation. Code lint integration. Quality scoring (0-100).</div>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon pink">⚡</div>
+                <div class="feature-title">Thinking Modes</div>
+                <div class="feature-desc">4 intensity levels: think, think-hard, think-harder, ultrathink.</div>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon cyan">📚</div>
+                <div class="feature-title">Docs Manager</div>
+                <div class="feature-desc">Index external documentation URLs. Smart crawling. @Docs references.</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

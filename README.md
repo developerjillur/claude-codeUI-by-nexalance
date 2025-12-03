@@ -2,7 +2,9 @@
 
 > **An Enterprise-Grade VS Code Extension for Claude Code CLI**
 
-Transform your VS Code into a powerful AI-assisted development environment with a beautiful, feature-rich chat interface.
+<p align="center">
+  <img src="assets/screenshots/features-overview.png" alt="Claude CodeUI Features" width="100%">
+</p>
 
 [![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/developerjillur/claude-codeUI-by-nexalance)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.94.0+-green.svg)](https://code.visualstudio.com/)
@@ -51,6 +53,51 @@ We extend our sincere gratitude to Andre Pimenta for creating the original exten
 6. **Project Context Manager** - Session persistence with auto-save
 7. **Self-Verification Engine** - Response validation and quality scoring
 8. **Documentation Manager** - External docs indexing and search
+
+---
+
+## Chat Interface
+
+<p align="center">
+  <img src="assets/screenshots/chatbox.png" alt="Claude CodeUI Chat Interface" width="800">
+</p>
+
+The beautiful chat interface features:
+- Real-time streaming responses with syntax highlighting
+- Model selector (Opus 4.5, Sonnet 4.5, Haiku 4.5)
+- Thinking mode indicator
+- Todo progress tracking
+- File references and slash commands
+
+---
+
+## Context Management
+
+<p align="center">
+  <img src="assets/screenshots/Context-Manager.png" alt="Context Manager" width="800">
+</p>
+
+Intelligent context window management with token tracking and auto-compression.
+
+---
+
+## Plan Modes
+
+<p align="center">
+  <img src="assets/screenshots/multiple-plan-mode.png" alt="Multiple Plan Modes" width="800">
+</p>
+
+Multiple planning modes: Plan Fast, Ask, Agent, and AutoMode for different workflows.
+
+---
+
+## Documentation Manager
+
+<p align="center">
+  <img src="assets/screenshots/treind-doc-manager.png" alt="Documentation Manager" width="800">
+</p>
+
+Index and search external documentation with smart crawling.
 
 ---
 
@@ -492,6 +539,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with love by [Developer Jillur](https://github.com/developerjillur) | [NexaLance](https://nexalance.com)**
+<p align="center">
+  <img src="icon.png" alt="Claude CodeUI" width="64">
+</p>
 
-**Star us on GitHub if this project helped you!**
+<p align="center">
+  <strong>Made with love by <a href="https://github.com/developerjillur">Developer Jillur</a> | <a href="https://nexalance.com">NexaLance</a></strong>
+</p>
+
+<p align="center">
+  <strong>Star us on GitHub if this project helped you!</strong>
+</p>
