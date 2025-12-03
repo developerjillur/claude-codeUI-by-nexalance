@@ -12,3 +12,5 @@ vsc-extension-quickstart.md
 backup
 .claude
 claude-code-chat-permissions-mcp/**
+# Note: templates/ is NOT ignored - it contains Smart Memory System templates
+# that are copied to user projects on extension activation

@@ -1,15 +1,15 @@
 {
-  "name": "claude-code-chat",
-  "displayName": "Chat for Claude Code",
-  "description": "Beautiful Claude Code Chat Interface for VS Code",
-  "version": "1.0.7",
-  "publisher": "AndrePimenta",
-  "author": "Andre Pimenta",
+  "name": "claude-codeui-by-nexalance",
+  "displayName": "Claude CodeUI by NexaLance",
+  "description": "A Complete Solution for Claude Code UI Chat Extension For VS Code - Inspired by claude-code-chat with Enhanced Features",
+  "version": "2.2.0",
+  "publisher": "DeveloperJillur",
+  "author": "Developer Jillur",
   "repository": {
     "type": "git",
-    "url": "https://github.com/andrepimenta/claude-code-chat"
+    "url": "https://github.com/developerjillur/claude-codeUI-by-nexalance"
   },
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.94.0"
   },
@@ -27,6 +27,8 @@
   ],
   "keywords": [
     "claude code",
+    "claude codeui",
+    "nexalance",
     "code explanation",
     "code generation",
     "code summary",
@@ -43,7 +45,10 @@
     "code",
     "programming",
     "development",
-    "productivity"
+    "productivity",
+    "checkpoint",
+    "memory",
+    "context management"
   ],
   "icon": "icon.png",
   "main": "./out/extension.js",
@@ -54,8 +59,8 @@
     "commands": [
       {
         "command": "claude-code-chat.openChat",
-        "title": "Open Claude Code Chat",
-        "category": "Claude Code Chat",
+        "title": "Open Claude CodeUI",
+        "category": "Claude CodeUI",
         "icon": "icon-bubble.png"
       }
     ],
@@ -131,10 +136,10 @@
         {
           "id": "claude-code-chat.chat",
           "type": "webview",
-          "name": "Claude Code Chat",
+          "name": "Claude CodeUI",
           "when": "true",
           "icon": "icon-bubble.png",
-          "contextualTitle": "Claude Code Chat"
+          "contextualTitle": "Claude CodeUI by NexaLance"
         }
       ]
     },
@@ -142,13 +147,13 @@
       "activitybar": [
         {
           "id": "claude-code-chat",
-          "title": "Claude Code Chat",
+          "title": "Claude CodeUI",
           "icon": "icon-bubble.png"
         }
       ]
     },
     "configuration": {
-      "title": "Claude Code Chat",
+      "title": "Claude CodeUI by NexaLance",
       "properties": {
         "claudeCodeChat.wsl.enabled": {
           "type": "boolean",
@@ -185,6 +190,76 @@
           "type": "boolean",
           "default": false,
           "description": "Enable Yolo Mode to skip all permission checks. Use with caution as Claude can execute any command without asking."
+        },
+        "claudeCodeChat.model.default": {
+          "type": "string",
+          "enum": [
+            "opus",
+            "sonnet",
+            "haiku",
+            "default"
+          ],
+          "default": "sonnet",
+          "enumDescriptions": [
+            "Opus 4.5 - Most powerful model for complex reasoning ($5/$25 per 1M tokens)",
+            "Sonnet 4.5 - Balanced performance and cost (Recommended) ($3/$15 per 1M tokens)",
+            "Haiku 4.5 - Fast and cost-efficient ($0.80/$4 per 1M tokens)",
+            "Default - Uses Claude Code CLI default configuration"
+          ],
+          "description": "Default model to use for Claude CodeUI conversations"
+        },
+        "claudeCodeChat.model.maxTokens": {
+          "type": "number",
+          "default": 16384,
+          "minimum": 1024,
+          "maximum": 128000,
+          "description": "Maximum output tokens for Claude responses (1024-128000)"
+        },
+        "claudeCodeChat.permissions.mode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "plan",
+            "acceptEdits",
+            "bypassPermissions"
+          ],
+          "default": "default",
+          "enumDescriptions": [
+            "Default - Read-only by default, asks before modifications",
+            "Plan Mode - Analyze code without modifying (read-only)",
+            "Accept Edits - Auto-approve file edits (still asks for commands)",
+            "Bypass Permissions - Skip all permission prompts (dangerous)"
+          ],
+          "description": "Default permission mode for Claude CodeUI operations"
+        },
+        "claudeCodeChat.memory.autoInject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically inject project memory context into prompts. This helps Claude understand your project history, decisions, and patterns."
+        },
+        "claudeCodeChat.memory.maxContextSize": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 500,
+          "maximum": 16000,
+          "description": "Maximum characters of memory context to inject (500-16000). Larger values provide more context but use more tokens."
+        },
+        "claudeCodeChat.plan.mode": {
+          "type": "string",
+          "enum": [
+            "planfast",
+            "ask",
+            "agent",
+            "auto"
+          ],
+          "default": "ask",
+          "enumDescriptions": [
+            "Plan Fast - Quick plan overview, then immediate implementation",
+            "Ask Mode - Detailed planning with approval required before execution",
+            "Agent Mode - Full autonomous agent that analyzes, plans, and executes independently",
+            "AutoMode - Creates comprehensive plan first, then automatically executes with full autonomy"
+          ],
+          "description": "Default plan mode for Claude CodeUI. Controls how Claude approaches your requests."
         }
       }
     }

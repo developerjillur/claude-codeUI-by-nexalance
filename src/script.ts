@@ -14,7 +14,29 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		let filteredFiles = [];
 		let selectedFileIndex = -1;
 		let planModeEnabled = false;
+		let selectedPlanMode = 'ask'; // 'planfast', 'ask', 'agent', or 'auto'
 		let thinkingModeEnabled = false;
+		let autoModePhase = 'idle'; // 'idle' | 'planning' | 'executing'
+		let autoModeOriginalMessage = '';
+		let restoreBackupAvailable = false;
+		let restoreBackupInfo = null;
+
+		// Edit prompt mode tracking
+		let messageIndex = 0;
+		let editingMessageDiv = null;
+		let originalMessageContent = '';
+
+		// Context window management
+		let contextUsagePercent = 0;
+		let contextStats = {
+			totalTokens: 0,
+			maxTokens: 200000,
+			usagePercent: 0,
+			messageCount: 0,
+			canCompress: false,
+			needsCompression: false,
+			isWarning: false
+		};
 
 		function shouldAutoScroll(messagesDiv) {
 			const threshold = 100; // pixels from bottom
@@ -39,30 +61,63 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		function addMessage(content, type = 'claude') {
 			const messagesDiv = document.getElementById('messages');
 			const shouldScroll = shouldAutoScroll(messagesDiv);
-			
+
+			// For system messages (like token info), use tree format
+			if (type === 'system') {
+				const treeDiv = document.createElement('div');
+				treeDiv.className = 'tree-token-info';
+				treeDiv.innerHTML = \`<span class="tree-token-icon">📊</span><span>\${escapeHtml(content.replace('📊 ', ''))}</span>\`;
+				messagesDiv.appendChild(treeDiv);
+				scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+				return;
+			}
+
+			// For Claude messages, use tree-item format with bullet
+			if (type === 'claude' || type === 'thinking') {
+				const treeDiv = document.createElement('div');
+				treeDiv.className = 'tree-item';
+
+				const bullet = document.createElement('span');
+				bullet.className = 'tree-bullet main';
+				bullet.innerHTML = '●';
+
+				const contentSpan = document.createElement('span');
+				contentSpan.className = 'tree-content';
+				contentSpan.innerHTML = content;
+
+				treeDiv.appendChild(bullet);
+				treeDiv.appendChild(contentSpan);
+				messagesDiv.appendChild(treeDiv);
+				scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+				return;
+			}
+
 			const messageDiv = document.createElement('div');
 			messageDiv.className = \`message \${type}\`;
-			
+
+			// Assign unique message ID for user messages (for edit/restore functionality)
+			if (type === 'user') {
+				messageIndex++;
+				messageDiv.setAttribute('data-message-id', \`msg-\${messageIndex}\`);
+				messageDiv.setAttribute('data-message-index', messageIndex.toString());
+			}
+
 			// Add header for main message types (excluding system)
-			if (type === 'user' || type === 'claude' || type === 'error') {
+			if (type === 'user' || type === 'error') {
 				const headerDiv = document.createElement('div');
 				headerDiv.className = 'message-header';
-				
+
 				const iconDiv = document.createElement('div');
 				iconDiv.className = \`message-icon \${type}\`;
-				
+
 				const labelDiv = document.createElement('div');
 				labelDiv.className = 'message-label';
-				
+
 				// Set icon and label based on type
 				switch(type) {
 					case 'user':
 						iconDiv.textContent = '👤';
-						labelDiv.textContent = 'You';
-						break;
-					case 'claude':
-						iconDiv.textContent = '🤖';
-						labelDiv.textContent = 'Claude';
+						labelDiv.textContent = 'YOU';
 						break;
 					case 'error':
 						iconDiv.textContent = '⚠️';
@@ -70,24 +125,49 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 						break;
 				}
 				
+				// Create button container for right side
+				const btnContainer = document.createElement('div');
+				btnContainer.className = 'message-btn-container';
+
+				// Add edit button for user messages only
+				if (type === 'user') {
+					const editBtn = document.createElement('button');
+					editBtn.className = 'edit-prompt-btn';
+					editBtn.title = 'Edit and resubmit prompt';
+					editBtn.onclick = () => enterEditPromptMode(messageDiv);
+					editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+					btnContainer.appendChild(editBtn);
+				}
+
+				// Add scroll-to-prompt button (not for first message)
+				if (messageIndex > 0) {
+					const scrollBtn = document.createElement('button');
+					scrollBtn.className = 'scroll-to-prompt-btn';
+					scrollBtn.title = 'Scroll to this prompt location';
+					scrollBtn.onclick = () => scrollToPromptInput(messageDiv);
+					scrollBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+					btnContainer.appendChild(scrollBtn);
+				}
+
 				// Add copy button
 				const copyBtn = document.createElement('button');
 				copyBtn.className = 'copy-btn';
 				copyBtn.title = 'Copy message';
 				copyBtn.onclick = () => copyMessageContent(messageDiv);
 				copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
-				
+				btnContainer.appendChild(copyBtn);
+
 				headerDiv.appendChild(iconDiv);
 				headerDiv.appendChild(labelDiv);
-				headerDiv.appendChild(copyBtn);
+				headerDiv.appendChild(btnContainer);
 				messageDiv.appendChild(headerDiv);
 			}
 			
 			// Add content
 			const contentDiv = document.createElement('div');
 			contentDiv.className = 'message-content';
-			
-			if(type == 'user' || type === 'claude' || type === 'thinking'){
+
+			if(type == 'user'){
 				contentDiv.innerHTML = content;
 			} else {
 				const preElement = document.createElement('pre');
@@ -115,84 +195,169 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		}
 
 
+		// Helper to get tool type for CSS class
+		function getToolType(toolName) {
+			const name = toolName.toLowerCase();
+			if (name.includes('read')) return 'read';
+			if (name.includes('write')) return 'write';
+			if (name.includes('edit') || name.includes('multiedit')) return 'edit';
+			if (name.includes('search') || name.includes('grep') || name.includes('glob')) return 'search';
+			if (name.includes('bash')) return 'bash';
+			if (name.includes('mcp') || name.startsWith('mcp_')) return 'mcp';
+			if (name.includes('task') || name.includes('agent')) return 'task';
+			return '';
+		}
+
+		// Format tool arguments for tree display
+		function formatTreeToolArgs(rawInput, toolName) {
+			if (!rawInput) return '';
+
+			// Handle different tool types
+			if (toolName === 'Read' && rawInput.file_path) {
+				const path = rawInput.file_path.replace(/^.*\\/Documents\\//, '~/Documents/').replace(/^.*\\/Users\\/[^/]+\\//, '~/');
+				return \`(<span class="tree-tool-args">\${escapeHtml(path)}</span>)\`;
+			}
+			if ((toolName === 'Grep' || toolName === 'Search') && rawInput.pattern) {
+				const pattern = rawInput.pattern.length > 50 ? rawInput.pattern.substring(0, 50) + '...' : rawInput.pattern;
+				let args = \`pattern: "\${escapeHtml(pattern)}"\`;
+				if (rawInput.path) {
+					const path = rawInput.path.replace(/^.*\\/Documents\\//, '~/Documents/').replace(/^.*\\/Users\\/[^/]+\\//, '~/');
+					args += \`, path: "\${escapeHtml(path)}"\`;
+				}
+				if (rawInput.output_mode) {
+					args += \`, output_mode: "\${rawInput.output_mode}"\`;
+				}
+				return \`(<span class="tree-tool-args">\${args}</span>)\`;
+			}
+			if (toolName === 'Glob' && rawInput.pattern) {
+				let args = \`pattern: "\${escapeHtml(rawInput.pattern)}"\`;
+				if (rawInput.path) {
+					const path = rawInput.path.replace(/^.*\\/Documents\\//, '~/Documents/').replace(/^.*\\/Users\\/[^/]+\\//, '~/');
+					args += \`, path: "\${escapeHtml(path)}"\`;
+				}
+				return \`(<span class="tree-tool-args">\${args}</span>)\`;
+			}
+			if ((toolName === 'Edit' || toolName === 'Write') && rawInput.file_path) {
+				const path = rawInput.file_path.replace(/^.*\\/Documents\\//, '~/Documents/').replace(/^.*\\/Users\\/[^/]+\\//, '~/');
+				return \`(<span class="tree-tool-args">\${escapeHtml(path)}</span>)\`;
+			}
+			if (toolName === 'Bash' && rawInput.command) {
+				const cmd = rawInput.command.length > 60 ? rawInput.command.substring(0, 60) + '...' : rawInput.command;
+				return \`(<span class="tree-tool-args">\${escapeHtml(cmd)}</span>)\`;
+			}
+			if (toolName === 'Task' && rawInput.prompt) {
+				const prompt = rawInput.prompt.length > 50 ? rawInput.prompt.substring(0, 50) + '...' : rawInput.prompt;
+				return \`(<span class="tree-tool-args">\${escapeHtml(prompt)}</span>)\`;
+			}
+
+			return '';
+		}
+
 		function addToolUseMessage(data) {
 			const messagesDiv = document.getElementById('messages');
 			const shouldScroll = shouldAutoScroll(messagesDiv);
-			
-			const messageDiv = document.createElement('div');
-			messageDiv.className = 'message tool';
-			
-			// Create modern header with icon
-			const headerDiv = document.createElement('div');
-			headerDiv.className = 'tool-header';
-			
-			const iconDiv = document.createElement('div');
-			iconDiv.className = 'tool-icon';
-			iconDiv.textContent = '🔧';
-			
-			const toolInfoElement = document.createElement('div');
-			toolInfoElement.className = 'tool-info';
+
+			// Create tree-style tool message
+			const treeDiv = document.createElement('div');
+			treeDiv.className = 'tree-tool';
+			treeDiv.setAttribute('data-tool-id', data.toolId || '');
+
+			// Get tool name and type
 			let toolName = data.toolInfo.replace('🔧 Executing: ', '');
-			// Replace TodoWrite with more user-friendly name
-			if (toolName === 'TodoWrite') {
-				toolName = 'Update Todos';
-			}
-			toolInfoElement.textContent = toolName;
-			
-			headerDiv.appendChild(iconDiv);
-			headerDiv.appendChild(toolInfoElement);
-			messageDiv.appendChild(headerDiv);
-			
+			const displayName = toolName === 'TodoWrite' ? 'Update Todos' : toolName;
+			const toolType = getToolType(toolName);
+
+			// Create header row with bullet and tool name (no toggle here)
+			const headerDiv = document.createElement('div');
+			headerDiv.className = 'tree-tool-header';
+
+			const bullet = document.createElement('span');
+			bullet.className = \`tree-tool-bullet \${toolType}\`;
+
+			const nameSpan = document.createElement('span');
+			nameSpan.className = \`tree-tool-name \${toolType}\`;
+			nameSpan.innerHTML = displayName + formatTreeToolArgs(data.rawInput, toolName);
+
+			headerDiv.appendChild(bullet);
+			headerDiv.appendChild(nameSpan);
+			treeDiv.appendChild(headerDiv);
+
+			// Create results container for expand/collapse functionality
+			const resultsContainer = document.createElement('div');
+			resultsContainer.className = 'tree-tool-results';
+
+			// Add child details for specific tools
 			if (data.rawInput) {
-				const inputElement = document.createElement('div');
-				inputElement.className = 'tool-input';
-				
-				const contentDiv = document.createElement('div');
-				contentDiv.className = 'tool-input-content';
-				
-				// Handle TodoWrite specially or format raw input
+				// Handle TodoWrite specially
 				if (data.toolName === 'TodoWrite' && data.rawInput.todos) {
-					let todoHtml = 'Todo List Update:';
+					const resultDiv = document.createElement('div');
+					resultDiv.className = 'tree-tool-result';
+					resultDiv.innerHTML = '<span class="tree-connector">└─</span><span class="tree-tool-result-content">Todo List Update:</span>';
+					resultsContainer.appendChild(resultDiv);
+
 					for (const todo of data.rawInput.todos) {
 						const status = todo.status === 'completed' ? '✅' :
 							todo.status === 'in_progress' ? '🔄' : '⏳';
-						todoHtml += '\\n' + status + ' ' + todo.content;
-					}
-					contentDiv.innerHTML = todoHtml;
-				} else {
-					// Format raw input with expandable content for long values
-					// Use diff format for Edit, MultiEdit, and Write tools, regular format for others
-					if (data.toolName === 'Edit') {
-						contentDiv.innerHTML = formatEditToolDiff(data.rawInput);
-					} else if (data.toolName === 'MultiEdit') {
-						contentDiv.innerHTML = formatMultiEditToolDiff(data.rawInput);
-					} else if (data.toolName === 'Write') {
-						contentDiv.innerHTML = formatWriteToolDiff(data.rawInput);
-					} else {
-						contentDiv.innerHTML = formatToolInputUI(data.rawInput);
+						const todoDiv = document.createElement('div');
+						todoDiv.className = 'tree-tool-result';
+						todoDiv.style.marginLeft = '28px';
+						todoDiv.innerHTML = \`<span class="tree-connector">  </span><span class="tree-tool-result-content">\${status} \${escapeHtml(todo.content)}</span>\`;
+						resultsContainer.appendChild(todoDiv);
 					}
 				}
-				
-				inputElement.appendChild(contentDiv);
-				messageDiv.appendChild(inputElement);
-			} else if (data.toolInput) {
-				// Fallback for pre-formatted input
-				const inputElement = document.createElement('div');
-				inputElement.className = 'tool-input';
-				
-				const labelDiv = document.createElement('div');
-				labelDiv.className = 'tool-input-label';
-				labelDiv.textContent = 'INPUT';
-				inputElement.appendChild(labelDiv);
-				
-				const contentDiv = document.createElement('div');
-				contentDiv.className = 'tool-input-content';
-				contentDiv.textContent = data.toolInput;
-				inputElement.appendChild(contentDiv);
-				messageDiv.appendChild(inputElement);
+				// For Read tool, show what's being read
+				else if (toolName === 'Read' && data.rawInput.file_path) {
+					const resultDiv = document.createElement('div');
+					resultDiv.className = 'tree-tool-result';
+					let info = '';
+					if (data.rawInput.limit) {
+						info = \`Read \${data.rawInput.limit} lines\`;
+						if (data.rawInput.offset) info += \` from line \${data.rawInput.offset}\`;
+					}
+					if (info) {
+						resultDiv.innerHTML = \`<span class="tree-connector">└─</span><span class="tree-tool-result-content">\${info}</span>\`;
+						resultsContainer.appendChild(resultDiv);
+					}
+				}
+				// For Edit tool, show diff info
+				else if ((toolName === 'Edit' || toolName === 'MultiEdit') && data.rawInput) {
+					const inputDiv = document.createElement('div');
+					inputDiv.className = 'tool-input';
+					inputDiv.style.marginLeft = '14px';
+					inputDiv.style.marginTop = '4px';
+
+					const contentDiv = document.createElement('div');
+					contentDiv.className = 'tool-input-content';
+
+					if (toolName === 'Edit') {
+						contentDiv.innerHTML = formatEditToolDiff(data.rawInput);
+					} else {
+						contentDiv.innerHTML = formatMultiEditToolDiff(data.rawInput);
+					}
+
+					inputDiv.appendChild(contentDiv);
+					resultsContainer.appendChild(inputDiv);
+				}
+				// For Write tool
+				else if (toolName === 'Write' && data.rawInput) {
+					const inputDiv = document.createElement('div');
+					inputDiv.className = 'tool-input';
+					inputDiv.style.marginLeft = '14px';
+					inputDiv.style.marginTop = '4px';
+
+					const contentDiv = document.createElement('div');
+					contentDiv.className = 'tool-input-content';
+					contentDiv.innerHTML = formatWriteToolDiff(data.rawInput);
+
+					inputDiv.appendChild(contentDiv);
+					resultsContainer.appendChild(inputDiv);
+				}
 			}
-			
-			messagesDiv.appendChild(messageDiv);
+
+			// Append results container to tree div
+			treeDiv.appendChild(resultsContainer);
+
+			messagesDiv.appendChild(treeDiv);
 			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
 		}
 
@@ -225,100 +390,149 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		function addToolResultMessage(data) {
 			const messagesDiv = document.getElementById('messages');
 			const shouldScroll = shouldAutoScroll(messagesDiv);
-			
-			// For Read and Edit tools with hidden flag, just hide loading state and show completion message
-			if (data.hidden && (data.toolName === 'Read' || data.toolName === 'Edit' || data.toolName === 'TodoWrite' || data.toolName === 'MultiEdit') && !data.isError) {				
-				return	
-				// Show completion message
-				const toolName = data.toolName;
-				let completionText;
-				if (toolName === 'Read') {
-					completionText = '✅ Read completed';
-				} else if (toolName === 'Edit') {
-					completionText = '✅ Edit completed';
-				} else if (toolName === 'TodoWrite') {
-					completionText = '✅ Update Todos completed';
-				} else {
-					completionText = '✅ ' + toolName + ' completed';
+
+			// For Read and Edit tools with hidden flag, just hide loading state
+			if (data.hidden && (data.toolName === 'Read' || data.toolName === 'Edit' || data.toolName === 'TodoWrite' || data.toolName === 'MultiEdit') && !data.isError) {
+				// For Read tool, add tree child showing result with Show/Hide toggle
+				if (data.toolName === 'Read' && data.content) {
+					// Find the last tree-tool element and add result to its results container
+					const lastTreeTool = messagesDiv.querySelector('.tree-tool:last-of-type');
+					if (lastTreeTool) {
+						const resultsContainer = lastTreeTool.querySelector('.tree-tool-results') || lastTreeTool;
+						const lines = data.content.split('\\n').length;
+						const size = data.content.length > 1024 ?
+							(data.content.length / 1024).toFixed(1) + 'KB' :
+							data.content.length + ' chars';
+
+						// Create result wrapper
+						const resultWrapper = document.createElement('div');
+						resultWrapper.className = 'tree-tool-result-wrapper';
+
+						// Create result line with toggle button
+						const resultDiv = document.createElement('div');
+						resultDiv.className = 'tree-tool-result';
+
+						const contentId = 'content_' + Math.random().toString(36).substr(2, 9);
+
+						// Create toggle button
+						const toggleBtn = document.createElement('button');
+						toggleBtn.className = 'tree-result-toggle';
+						toggleBtn.innerHTML = '▶ Show';
+						toggleBtn.onclick = function() {
+							const contentDiv = document.getElementById(contentId);
+							if (contentDiv) {
+								const isVisible = contentDiv.classList.contains('visible');
+								if (isVisible) {
+									contentDiv.classList.remove('visible');
+									toggleBtn.innerHTML = '▶ Show';
+								} else {
+									contentDiv.classList.add('visible');
+									toggleBtn.innerHTML = '▼ Hide';
+								}
+							}
+						};
+
+						resultDiv.innerHTML = \`<span class="tree-connector">└─</span><span class="tree-tool-result-content">\${escapeHtml(data.content.substring(0, 80))}\${data.content.length > 80 ? '...' : ''} (\${size})</span>\`;
+						resultDiv.appendChild(toggleBtn);
+
+						// Create hidden content container
+						const fullContentDiv = document.createElement('div');
+						fullContentDiv.id = contentId;
+						fullContentDiv.className = 'tree-result-content-full';
+						fullContentDiv.textContent = data.content;
+
+						resultWrapper.appendChild(resultDiv);
+						resultWrapper.appendChild(fullContentDiv);
+						resultsContainer.appendChild(resultWrapper);
+					}
 				}
-				addMessage(completionText, 'system');
-				return; // Don't show the result message
+				return;
 			}
-			
+
 			if(data.isError && data.content === "File has not been read yet. Read it first before writing to it."){
 				return addMessage("File has not been read yet. Let me read it first before writing to it.", 'system');
 			}
 
-			const messageDiv = document.createElement('div');
-			messageDiv.className = data.isError ? 'message error' : 'message tool-result';
-			
-			// Create header
-			const headerDiv = document.createElement('div');
-			headerDiv.className = 'message-header';
-			
-			const iconDiv = document.createElement('div');
-			iconDiv.className = data.isError ? 'message-icon error' : 'message-icon';
-			iconDiv.style.background = data.isError ? 
-				'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)' : 
-				'linear-gradient(135deg, #1cc08c 0%, #16a974 100%)';
-			iconDiv.textContent = data.isError ? '❌' : '✅';
-			
-			const labelDiv = document.createElement('div');
-			labelDiv.className = 'message-label';
-			labelDiv.textContent = data.isError ? 'Error' : 'Result';
-			
-			headerDiv.appendChild(iconDiv);
-			headerDiv.appendChild(labelDiv);
-			messageDiv.appendChild(headerDiv);
-			
-			// Add content
-			const contentDiv = document.createElement('div');
-			contentDiv.className = 'message-content';
-			
-			// Check if it's a tool result and truncate appropriately
-			let content = data.content;
-			if (content.length > 200 && !data.isError) {
-				const truncateAt = 197;
-				const truncated = content.substring(0, truncateAt);
-				const resultId = 'result_' + Math.random().toString(36).substr(2, 9);
-				
-				const preElement = document.createElement('pre');
-				preElement.innerHTML = '<span id="' + resultId + '_visible">' + escapeHtml(truncated) + '</span>' +
-									   '<span id="' + resultId + '_ellipsis">...</span>' +
-									   '<span id="' + resultId + '_hidden" style="display: none;">' + escapeHtml(content.substring(truncateAt)) + '</span>';
-				contentDiv.appendChild(preElement);
-				
-				// Add expand button container
-				const expandContainer = document.createElement('div');
-				expandContainer.className = 'diff-expand-container';
-				const expandButton = document.createElement('button');
-				expandButton.className = 'diff-expand-btn';
-				expandButton.textContent = 'Show more';
-				expandButton.setAttribute('onclick', 'toggleResultExpansion(\\'' + resultId + '\\\')');
-				expandContainer.appendChild(expandButton);
-				contentDiv.appendChild(expandContainer);
+			// Create tree-style result
+			const treeDiv = document.createElement('div');
+			treeDiv.className = 'tree-tool-result';
+			treeDiv.style.marginLeft = '0';
+			treeDiv.style.paddingLeft = '14px';
+
+			const content = data.content || '';
+
+			if (data.isError) {
+				// Show error in tree format
+				treeDiv.innerHTML = \`<span class="tree-connector" style="color: var(--accent-red);">└─</span><span class="tree-tool-result-content" style="color: var(--accent-red);">Error: \${escapeHtml(content.substring(0, 100))}\${content.length > 100 ? '...' : ''}</span>\`;
+
+				// Check if this is a permission-related error and add yolo mode button
+				if (isPermissionError(content)) {
+					const yoloDiv = document.createElement('div');
+					yoloDiv.className = 'yolo-suggestion';
+					yoloDiv.style.marginLeft = '14px';
+					yoloDiv.innerHTML = \`
+						<div class="yolo-suggestion-text">
+							<span>💡 Permission issue. Enable Yolo Mode to skip permission checks.</span>
+						</div>
+						<button class="yolo-suggestion-btn" onclick="enableYoloMode()">Enable Yolo Mode</button>
+					\`;
+					messagesDiv.appendChild(treeDiv);
+					messagesDiv.appendChild(yoloDiv);
+					scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+					return;
+				}
 			} else {
-				const preElement = document.createElement('pre');
-				preElement.textContent = content;
-				contentDiv.appendChild(preElement);
+				// Show success result in tree format with Show/Hide toggle for long content
+				const lines = content.split('\\n').length;
+				const size = content.length > 1024 ?
+					(content.length / 1024).toFixed(1) + 'KB' :
+					content.length + ' chars';
+
+				// Create wrapper for result + expandable content
+				const resultWrapper = document.createElement('div');
+				resultWrapper.className = 'tree-tool-result-wrapper';
+
+				// Truncate display content
+				const displayContent = content.length > 80 ? content.substring(0, 80) + '...' : content;
+
+				treeDiv.innerHTML = \`<span class="tree-connector">└─</span><span class="tree-tool-result-content">\${escapeHtml(displayContent)} (\${size})</span>\`;
+
+				// Add Show/Hide toggle for content longer than 80 chars
+				if (content.length > 80) {
+					const contentId = 'content_' + Math.random().toString(36).substr(2, 9);
+
+					const toggleBtn = document.createElement('button');
+					toggleBtn.className = 'tree-result-toggle';
+					toggleBtn.innerHTML = '▶ Show';
+					toggleBtn.onclick = function() {
+						const contentDiv = document.getElementById(contentId);
+						if (contentDiv) {
+							const isVisible = contentDiv.classList.contains('visible');
+							if (isVisible) {
+								contentDiv.classList.remove('visible');
+								toggleBtn.innerHTML = '▶ Show';
+							} else {
+								contentDiv.classList.add('visible');
+								toggleBtn.innerHTML = '▼ Hide';
+							}
+						}
+					};
+					treeDiv.appendChild(toggleBtn);
+
+					// Create hidden full content container
+					const fullContentDiv = document.createElement('div');
+					fullContentDiv.id = contentId;
+					fullContentDiv.className = 'tree-result-content-full';
+					fullContentDiv.textContent = content;
+
+					resultWrapper.appendChild(treeDiv);
+					resultWrapper.appendChild(fullContentDiv);
+					messagesDiv.appendChild(resultWrapper);
+				} else {
+					messagesDiv.appendChild(treeDiv);
+				}
 			}
-			
-			messageDiv.appendChild(contentDiv);
-			
-			// Check if this is a permission-related error and add yolo mode button
-			if (data.isError && isPermissionError(content)) {
-				const yoloSuggestion = document.createElement('div');
-				yoloSuggestion.className = 'yolo-suggestion';
-				yoloSuggestion.innerHTML = \`
-					<div class="yolo-suggestion-text">
-						<span>💡 This looks like a permission issue. You can enable Yolo Mode to skip all permission checks.</span>
-					</div>
-					<button class="yolo-suggestion-btn" onclick="enableYoloMode()">Enable Yolo Mode</button>
-				\`;
-				messageDiv.appendChild(yoloSuggestion);
-			}
-			
-			messagesDiv.appendChild(messageDiv);
+
 			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
 		}
 
@@ -715,13 +929,20 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		function sendMessage() {
 			const text = messageInput.value.trim();
 			if (text) {
+				// Track if this is AutoMode Phase 1
+				if (planModeEnabled && selectedPlanMode === 'auto') {
+					autoModePhase = 'planning';
+					autoModeOriginalMessage = text;
+				}
+
 				vscode.postMessage({
 					type: 'sendMessage',
 					text: text,
 					planMode: planModeEnabled,
+					planModeType: selectedPlanMode,
 					thinkingMode: thinkingModeEnabled
 				});
-				
+
 				messageInput.value = '';
 			}
 		}
@@ -729,11 +950,128 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		function togglePlanMode() {
 			planModeEnabled = !planModeEnabled;
 			const switchElement = document.getElementById('planModeSwitch');
+
 			if (planModeEnabled) {
 				switchElement.classList.add('active');
+				// Show plan mode selection modal when enabling
+				showPlanModeModal();
 			} else {
 				switchElement.classList.remove('active');
+				// Reset label to default when turning off
+				const toggleLabel = document.getElementById('planModeLabel');
+				if (toggleLabel) {
+					toggleLabel.textContent = 'Plan First';
+				}
 			}
+		}
+
+		// Plan Mode Modal Functions
+		function showPlanModeModal() {
+			// Update selection state based on current selectedPlanMode
+			updatePlanModeSelection(selectedPlanMode);
+			document.getElementById('planModeModal').style.display = 'flex';
+		}
+
+		function hidePlanModeModal() {
+			document.getElementById('planModeModal').style.display = 'none';
+		}
+
+		function selectPlanMode(mode) {
+			selectedPlanMode = mode;
+			updatePlanModeSelection(mode);
+		}
+
+		function updatePlanModeSelection(mode) {
+			// Remove selected class from all options
+			const options = document.querySelectorAll('.plan-mode-option');
+			options.forEach(option => {
+				option.classList.remove('selected');
+			});
+
+			// Add selected class to the chosen option
+			const selectedOption = document.getElementById('planMode-' + mode);
+			if (selectedOption) {
+				selectedOption.classList.add('selected');
+			}
+
+			// Update radio button
+			const radioBtn = document.getElementById('radio-' + mode);
+			if (radioBtn) {
+				radioBtn.checked = true;
+			}
+		}
+
+		function updatePlanModeToggleName(mode) {
+			const modeNames = {
+				'planfast': 'Plan Fast',
+				'ask': 'Ask Mode',
+				'agent': 'Agent Mode',
+				'auto': 'AutoMode'
+			};
+			const modeName = modeNames[mode] || 'Plan First';
+			const toggleLabel = document.getElementById('planModeLabel');
+			if (toggleLabel) {
+				toggleLabel.textContent = modeName;
+			}
+		}
+
+		function confirmPlanMode() {
+			// Update the toggle name with confirmed selection
+			updatePlanModeToggleName(selectedPlanMode);
+
+			// Save the plan mode setting
+			vscode.postMessage({
+				type: 'updateSettings',
+				settings: {
+					'plan.mode': selectedPlanMode
+				}
+			});
+
+			// Close the modal
+			hidePlanModeModal();
+		}
+
+		// AutoMode: Trigger Phase 2 execution after Phase 1 planning completes
+		function triggerAutoModeExecution() {
+			// Show system message
+			addSystemMessage('AutoMode: Plan received. Proceeding with autonomous execution...');
+
+			// Send execution request with Agent mode
+			const proceedMessage = 'Proceed with the implementation plan you just created. Execute all steps autonomously with minimal intervention. Report progress and handle edge cases proactively.';
+
+			vscode.postMessage({
+				type: 'sendMessage',
+				text: proceedMessage,
+				planMode: true,
+				planModeType: 'agent',
+				thinkingMode: thinkingModeEnabled
+			});
+
+			// Force UI state immediately - use forceShowStopButton to guarantee it
+			isProcessing = true;
+			forceShowStopButton();
+
+			// Also run after delays to override any competing updates from extension messages
+			setTimeout(() => {
+				if (autoModePhase === 'executing') {
+					forceShowStopButton();
+				}
+			}, 50);
+
+			setTimeout(() => {
+				if (autoModePhase === 'executing') {
+					forceShowStopButton();
+				}
+			}, 150);
+		}
+
+		// Helper function to add system messages for AutoMode
+		function addSystemMessage(text) {
+			const messageDiv = document.createElement('div');
+			messageDiv.className = 'message system-message';
+			messageDiv.innerHTML = '<div class="message-content">' + text + '</div>';
+			messagesDiv.appendChild(messageDiv);
+			scrollToBottomIfNeeded(messagesDiv, true);
 		}
 
 		function toggleThinkingMode() {
@@ -861,7 +1199,7 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		}
 
 		messageInput.addEventListener('input', adjustTextareaHeight);
-		
+
 		// Save input text as user types (debounced)
 		let saveInputTimeout;
 		messageInput.addEventListener('input', () => {
@@ -873,8 +1211,18 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				});
 			}, 500); // Save after 500ms of no typing
 		});
+
+		// Check for @docs mentions while typing
+		messageInput.addEventListener('input', () => {
+			checkForDocsMention(messageInput);
+		});
 		
 		messageInput.addEventListener('keydown', (e) => {
+			// Handle docs autocomplete keyboard navigation first
+			if (handleDocsAutocompleteKey(e)) {
+				return;
+			}
+
 			if (e.key === 'Enter' && !e.shiftKey) {
 				e.preventDefault();
 				const sendBtn = document.getElementById('sendBtn');
@@ -884,12 +1232,16 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				sendMessage();
 			} else if (e.key === '@' && !e.ctrlKey && !e.metaKey) {
 				// Don't prevent default, let @ be typed first
+				// Check for docs mentions after a short delay
 				setTimeout(() => {
-					showFilePicker();
-				}, 0);
+					checkForDocsMention(messageInput);
+				}, 50);
 			} else if (e.key === 'Escape' && filePickerModal.style.display === 'flex') {
 				e.preventDefault();
 				hideFilePicker();
+			} else if (e.key === 'Escape' && docsAutocompleteVisible) {
+				e.preventDefault();
+				hideDocsAutocomplete();
 			} else if (e.key === 'v' && (e.ctrlKey || e.metaKey)) {
 				// Handle Ctrl+V/Cmd+V explicitly in case paste event doesn't fire
 				// Don't prevent default - let browser handle it first
@@ -1102,6 +1454,1489 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				hideMCPModal();
 			}
 		});
+
+		// ===== Documentation Manager Functions =====
+		let docsCache = [];
+
+		function showDocsModal() {
+			document.getElementById('docsModal').style.display = 'flex';
+			loadDocs();
+		}
+
+		function hideDocsModal() {
+			document.getElementById('docsModal').style.display = 'none';
+			hideAddDocForm();
+		}
+
+		// Close docs modal when clicking outside
+		document.getElementById('docsModal')?.addEventListener('click', (e) => {
+			if (e.target === document.getElementById('docsModal')) {
+				hideDocsModal();
+			}
+		});
+
+		function loadDocs() {
+			vscode.postMessage({ type: 'loadDocs' });
+		}
+
+		function renderDocsList(docs) {
+			docsCache = docs || [];
+			const container = document.getElementById('docsList');
+
+			if (!docs || docs.length === 0) {
+				container.innerHTML = '<div class="no-docs">No documentation indexed yet. Click "+ Add Documentation" to get started.</div>';
+				updateDocsStats({ totalDocs: 0, totalPages: 0, totalSize: '0 KB' });
+				return;
+			}
+
+			let html = '';
+			for (const doc of docs) {
+				const statusClass = doc.status;
+				const date = new Date(doc.updatedAt).toLocaleDateString();
+				const time = new Date(doc.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+				html += \`
+					<div class="docs-item" data-doc-id="\${doc.id}">
+						<div class="docs-item-status \${statusClass}" title="\${doc.status}"></div>
+						<div class="docs-item-info">
+							<div class="docs-item-name">@\${doc.name}</div>
+							<div class="docs-item-meta">
+								<span>\${doc.pageCount} pages</span>
+								<span>Indexed \${date}, \${time}</span>
+							</div>
+							<div class="docs-item-url">\${doc.entryUrl}</div>
+							\${doc.status === 'indexing' ? '<div class="docs-item-progress">Crawling in progress...</div>' : ''}
+							\${doc.status === 'failed' && doc.error ? '<div class="docs-item-error">Error: ' + escapeHtml(doc.error) + '</div>' : ''}
+						</div>
+						<div class="docs-item-actions">
+							<button class="docs-action-btn" onclick="reindexDoc('\${doc.id}')" title="Re-index">🔄</button>
+							<button class="docs-action-btn delete" onclick="deleteDoc('\${doc.id}')" title="Delete">🗑️</button>
+						</div>
+					</div>
+				\`;
+			}
+
+			container.innerHTML = html;
+		}
+
+		function updateDocsStats(stats) {
+			const container = document.getElementById('docsStats');
+			if (stats.totalDocs === 0) {
+				container.innerHTML = '';
+				return;
+			}
+			container.innerHTML = \`Total: \${stats.totalDocs} docs • \${stats.totalPages} pages • \${stats.totalSize}\`;
+		}
+
+		function showAddDocForm() {
+			document.getElementById('addDocBtn').style.display = 'none';
+			document.getElementById('addDocForm').style.display = 'block';
+		}
+
+		function hideAddDocForm() {
+			document.getElementById('addDocBtn').style.display = 'block';
+			document.getElementById('addDocForm').style.display = 'none';
+			document.getElementById('docsAdvancedOptions').style.display = 'none';
+
+			// Clear form
+			document.getElementById('docName').value = '';
+			document.getElementById('docEntryUrl').value = '';
+			document.getElementById('docPrefixUrl').value = '';
+			document.getElementById('docMaxPages').value = '50';
+			document.getElementById('docMaxDepth').value = '3';
+		}
+
+		function toggleDocsAdvanced() {
+			const options = document.getElementById('docsAdvancedOptions');
+			const toggle = document.querySelector('.docs-advanced-toggle span');
+			if (options.style.display === 'none') {
+				options.style.display = 'block';
+				toggle.textContent = '▼ Advanced Options';
+			} else {
+				options.style.display = 'none';
+				toggle.textContent = '▶ Advanced Options';
+			}
+		}
+
+		function startAddDoc() {
+			const name = document.getElementById('docName').value.trim();
+			const entryUrl = document.getElementById('docEntryUrl').value.trim();
+			const prefixUrl = document.getElementById('docPrefixUrl').value.trim();
+			const maxPages = parseInt(document.getElementById('docMaxPages').value) || 50;
+			const maxDepth = parseInt(document.getElementById('docMaxDepth').value) || 3;
+
+			if (!name) {
+				alert('Please enter a name for the documentation');
+				return;
+			}
+
+			if (!entryUrl) {
+				alert('Please enter the entry URL');
+				return;
+			}
+
+			// Validate URL
+			try {
+				new URL(entryUrl);
+			} catch {
+				alert('Please enter a valid URL');
+				return;
+			}
+
+			vscode.postMessage({
+				type: 'addDoc',
+				name,
+				entryUrl,
+				prefixUrl,
+				maxPages,
+				maxDepth
+			});
+
+			hideAddDocForm();
+		}
+
+		function reindexDoc(docId) {
+			// Show inline confirmation
+			const item = document.querySelector(\`.docs-item[data-doc-id="\${docId}"]\`);
+			if (!item) return;
+
+			const actionsDiv = item.querySelector('.docs-item-actions');
+			if (!actionsDiv) return;
+
+			// Check if already showing confirmation
+			if (actionsDiv.querySelector('.confirm-actions')) return;
+
+			// Save original content and show confirmation
+			const originalContent = actionsDiv.innerHTML;
+			actionsDiv.innerHTML = \`
+				<div class="confirm-actions">
+					<span class="confirm-text">Re-crawl?</span>
+					<button class="docs-action-btn confirm-yes" onclick="confirmReindexDoc('\${docId}')">✓</button>
+					<button class="docs-action-btn confirm-no" onclick="cancelDocAction('\${docId}')">✗</button>
+				</div>
+			\`;
+			actionsDiv.dataset.originalContent = originalContent;
+		}
+
+		function confirmReindexDoc(docId) {
+			// Send the reindex request
+			vscode.postMessage({ type: 'reindexDoc', docId: docId });
+			// Restore buttons
+			cancelDocAction(docId);
+		}
+
+		function deleteDoc(docId) {
+			// Show inline confirmation
+			const item = document.querySelector(\`.docs-item[data-doc-id="\${docId}"]\`);
+			if (!item) return;
+
+			const actionsDiv = item.querySelector('.docs-item-actions');
+			if (!actionsDiv) return;
+
+			// Check if already showing confirmation
+			if (actionsDiv.querySelector('.confirm-actions')) return;
+
+			// Save original content and show confirmation
+			const originalContent = actionsDiv.innerHTML;
+			actionsDiv.innerHTML = \`
+				<div class="confirm-actions">
+					<span class="confirm-text">Delete?</span>
+					<button class="docs-action-btn confirm-yes delete" onclick="confirmDeleteDoc('\${docId}')">✓</button>
+					<button class="docs-action-btn confirm-no" onclick="cancelDocAction('\${docId}')">✗</button>
+				</div>
+			\`;
+			actionsDiv.dataset.originalContent = originalContent;
+		}
+
+		function confirmDeleteDoc(docId) {
+			// Send the delete request
+			vscode.postMessage({ type: 'deleteDoc', docId: docId });
+		}
+
+		function cancelDocAction(docId) {
+			const item = document.querySelector(\`.docs-item[data-doc-id="\${docId}"]\`);
+			if (!item) return;
+
+			const actionsDiv = item.querySelector('.docs-item-actions');
+			if (!actionsDiv || !actionsDiv.dataset.originalContent) return;
+
+			actionsDiv.innerHTML = actionsDiv.dataset.originalContent;
+			delete actionsDiv.dataset.originalContent;
+		}
+
+		function updateDocProgress(docId, current, total, status) {
+			const item = document.querySelector(\`.docs-item[data-doc-id="\${docId}"]\`);
+			if (!item) return;
+
+			const progressDiv = item.querySelector('.docs-item-progress');
+			if (status.startsWith('error:')) {
+				if (progressDiv) {
+					progressDiv.className = 'docs-item-error';
+					progressDiv.textContent = status;
+				}
+				const statusDot = item.querySelector('.docs-item-status');
+				statusDot.className = 'docs-item-status failed';
+			} else if (status === 'completed') {
+				loadDocs(); // Refresh the list
+			} else {
+				if (progressDiv) {
+					progressDiv.textContent = \`\${status} (\${current}/\${total})\`;
+				}
+			}
+		}
+
+		// ===== @Docs Mention Autocomplete =====
+		let docsAutocompleteVisible = false;
+		let docsAutocompleteIndex = 0;
+
+		function showDocsAutocomplete(searchTerm) {
+			const filteredDocs = docsCache.filter(d =>
+				d.status === 'indexed' &&
+				d.name.toLowerCase().includes(searchTerm.toLowerCase())
+			);
+
+			if (filteredDocs.length === 0) {
+				hideDocsAutocomplete();
+				return;
+			}
+
+			let container = document.getElementById('docsAutocomplete');
+			if (!container) {
+				container = document.createElement('div');
+				container.id = 'docsAutocomplete';
+				container.className = 'docs-autocomplete';
+				document.querySelector('.textarea-wrapper').appendChild(container);
+			}
+
+			let html = '<div class="docs-autocomplete-header">📚 Documentation</div>';
+			filteredDocs.forEach((doc, index) => {
+				html += \`
+					<div class="docs-autocomplete-item \${index === docsAutocompleteIndex ? 'selected' : ''}"
+						 data-doc-name="\${doc.name}"
+						 onclick="insertDocMention('\${doc.name}')">
+						<span class="docs-autocomplete-icon">📖</span>
+						<div class="docs-autocomplete-info">
+							<div class="docs-autocomplete-name">@\${doc.name}</div>
+							<div class="docs-autocomplete-detail">\${doc.pageCount} pages</div>
+						</div>
+					</div>
+				\`;
+			});
+
+			container.innerHTML = html;
+			container.style.display = 'block';
+			docsAutocompleteVisible = true;
+		}
+
+		function hideDocsAutocomplete() {
+			const container = document.getElementById('docsAutocomplete');
+			if (container) {
+				container.style.display = 'none';
+			}
+			docsAutocompleteVisible = false;
+			docsAutocompleteIndex = 0;
+		}
+
+		function insertDocMention(docName) {
+			const input = document.getElementById('messageInput');
+			const text = input.value;
+			const cursorPos = input.selectionStart;
+
+			// Find the @ symbol position
+			let atPos = cursorPos - 1;
+			while (atPos >= 0 && text[atPos] !== '@' && text[atPos] !== ' ' && text[atPos] !== '\\n') {
+				atPos--;
+			}
+
+			if (text[atPos] === '@') {
+				const before = text.substring(0, atPos);
+				const after = text.substring(cursorPos);
+				input.value = before + '@' + docName + ' ' + after;
+				input.selectionStart = input.selectionEnd = atPos + docName.length + 2;
+			}
+
+			hideDocsAutocomplete();
+			input.focus();
+		}
+
+		// Handle keyboard navigation in autocomplete
+		function handleDocsAutocompleteKey(e) {
+			if (!docsAutocompleteVisible) return false;
+
+			const items = document.querySelectorAll('.docs-autocomplete-item');
+			if (items.length === 0) return false;
+
+			if (e.key === 'ArrowDown') {
+				e.preventDefault();
+				docsAutocompleteIndex = Math.min(docsAutocompleteIndex + 1, items.length - 1);
+				updateDocsAutocompleteSelection(items);
+				return true;
+			} else if (e.key === 'ArrowUp') {
+				e.preventDefault();
+				docsAutocompleteIndex = Math.max(docsAutocompleteIndex - 1, 0);
+				updateDocsAutocompleteSelection(items);
+				return true;
+			} else if (e.key === 'Enter' || e.key === 'Tab') {
+				e.preventDefault();
+				const selectedItem = items[docsAutocompleteIndex];
+				if (selectedItem) {
+					insertDocMention(selectedItem.dataset.docName);
+				}
+				return true;
+			} else if (e.key === 'Escape') {
+				hideDocsAutocomplete();
+				return true;
+			}
+
+			return false;
+		}
+
+		function updateDocsAutocompleteSelection(items) {
+			items.forEach((item, index) => {
+				item.classList.toggle('selected', index === docsAutocompleteIndex);
+			});
+		}
+
+		// Check for @ mentions in input
+		function checkForDocsMention(input) {
+			const text = input.value;
+			const cursorPos = input.selectionStart;
+
+			// Find if we're typing after an @
+			let atPos = cursorPos - 1;
+			while (atPos >= 0 && text[atPos] !== ' ' && text[atPos] !== '\\n') {
+				if (text[atPos] === '@') {
+					const searchTerm = text.substring(atPos + 1, cursorPos);
+					// Only show autocomplete if we have docs cached and term is not empty
+					if (docsCache.length > 0) {
+						showDocsAutocomplete(searchTerm);
+						return;
+					}
+				}
+				atPos--;
+			}
+
+			hideDocsAutocomplete();
+		}
+
+		// ===== Project Memory Management Functions =====
+		let memorySearchTimeout;
+		const entityTypeIcons = {
+			project: '📁',
+			task: '✅',
+			file: '📄',
+			decision: '🎯',
+			pattern: '🔄',
+			bug: '🐛',
+			feature: '✨',
+			dependency: '📦',
+			architecture: '🏗️',
+			conversation: '💬',
+			milestone: '🏆'
+		};
+
+		function showMemoryModal() {
+			document.getElementById('memoryModal').style.display = 'flex';
+			loadMemoryStats();
+			loadMemorySettings();
+		}
+
+		function hideMemoryModal() {
+			document.getElementById('memoryModal').style.display = 'none';
+			document.getElementById('memorySearchResults').style.display = 'none';
+			document.getElementById('memoryEntitiesSection').style.display = 'block';
+			document.getElementById('memorySearchInput').value = '';
+		}
+
+		// Memory Settings Functions
+		function loadMemorySettings() {
+			vscode.postMessage({ type: 'getMemorySettings' });
+		}
+
+		function renderMemorySettings(settings) {
+			const autoInjectCheckbox = document.getElementById('memoryAutoInject');
+			const maxContextInput = document.getElementById('memoryMaxContext');
+			const maxContextSlider = document.getElementById('memoryMaxContextSlider');
+
+			if (autoInjectCheckbox) {
+				autoInjectCheckbox.checked = settings.autoInject !== false;
+			}
+			if (maxContextInput) {
+				maxContextInput.value = settings.maxContextSize || 4000;
+			}
+			if (maxContextSlider) {
+				maxContextSlider.value = settings.maxContextSize || 4000;
+			}
+		}
+
+		function syncMemoryContextSlider(value) {
+			const maxContextInput = document.getElementById('memoryMaxContext');
+			if (maxContextInput) {
+				maxContextInput.value = value;
+			}
+			updateMemorySettings();
+		}
+
+		function updateMemorySettings() {
+			const autoInjectCheckbox = document.getElementById('memoryAutoInject');
+			const maxContextInput = document.getElementById('memoryMaxContext');
+
+			const settings = {
+				autoInject: autoInjectCheckbox ? autoInjectCheckbox.checked : true,
+				maxContextSize: maxContextInput ? parseInt(maxContextInput.value, 10) : 4000
+			};
+
+			// Sync slider with input
+			const slider = document.getElementById('memoryMaxContextSlider');
+			if (slider) {
+				slider.value = settings.maxContextSize;
+			}
+
+			vscode.postMessage({ type: 'updateMemorySettings', settings });
+		}
+
+		// Close memory modal when clicking outside
+		document.getElementById('memoryModal')?.addEventListener('click', (e) => {
+			if (e.target === document.getElementById('memoryModal')) {
+				hideMemoryModal();
+			}
+		});
+
+		function loadMemoryStats() {
+			// Show loading state
+			document.getElementById('memoryTotalEntities').textContent = '...';
+			document.getElementById('memoryTotalRelations').textContent = '...';
+			document.getElementById('memoryTotalObservations').textContent = '...';
+			document.getElementById('memoryLastUpdated').textContent = 'Loading...';
+			document.getElementById('memoryEntityTypes').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Loading entities...</p>';
+
+			vscode.postMessage({ type: 'getMemoryStats' });
+		}
+
+		let memoryRetryCount = 0;
+		const maxMemoryRetries = 3;
+
+		function renderMemoryStats(data) {
+			if (!data.initialized) {
+				// Retry loading memory stats if initialization is in progress
+				if (memoryRetryCount < maxMemoryRetries) {
+					memoryRetryCount++;
+					document.getElementById('memoryTotalEntities').textContent = '-';
+					document.getElementById('memoryTotalRelations').textContent = '-';
+					document.getElementById('memoryTotalObservations').textContent = '-';
+					document.getElementById('memoryLastUpdated').textContent = 'Initializing... (attempt ' + memoryRetryCount + '/' + maxMemoryRetries + ')';
+					document.getElementById('memoryEntityTypes').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Loading memory system...</p>';
+					// Retry after a delay
+					setTimeout(() => {
+						loadMemoryStats();
+					}, 1500);
+					return;
+				}
+				document.getElementById('memoryTotalEntities').textContent = '-';
+				document.getElementById('memoryTotalRelations').textContent = '-';
+				document.getElementById('memoryTotalObservations').textContent = '-';
+				document.getElementById('memoryLastUpdated').textContent = 'Memory not initialized';
+				document.getElementById('memoryEntityTypes').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Memory not available. Please reload the extension.</p>';
+				return;
+			}
+
+			// Reset retry count on success
+			memoryRetryCount = 0;
+
+			document.getElementById('memoryTotalEntities').textContent = data.totalEntities || 0;
+			document.getElementById('memoryTotalRelations').textContent = data.totalRelations || 0;
+			document.getElementById('memoryTotalObservations').textContent = data.totalObservations || 0;
+
+			if (data.lastUpdated) {
+				const date = new Date(data.lastUpdated);
+				document.getElementById('memoryLastUpdated').textContent = 'Last updated: ' + date.toLocaleString();
+			}
+
+			// Render entity type breakdown
+			if (data.entitiesByType) {
+				let html = '';
+				for (const [type, count] of Object.entries(data.entitiesByType)) {
+					if (count > 0) {
+						const icon = entityTypeIcons[type] || '📌';
+						html += \`
+							<div class="memory-entity-type">
+								<span class="memory-entity-type-name">
+									<span class="memory-entity-type-icon">\${icon}</span>
+									\${type}
+								</span>
+								<span class="memory-entity-type-count">\${count}</span>
+							</div>
+						\`;
+					}
+				}
+				document.getElementById('memoryEntityTypes').innerHTML = html || '<p style="text-align: center; color: var(--text-muted);">No entities recorded yet</p>';
+			}
+		}
+
+		function debounceMemorySearch(query) {
+			clearTimeout(memorySearchTimeout);
+			if (query.length < 2) {
+				document.getElementById('memorySearchResults').style.display = 'none';
+				document.getElementById('memoryEntitiesSection').style.display = 'block';
+				return;
+			}
+			memorySearchTimeout = setTimeout(() => {
+				searchMemory(query);
+			}, 300);
+		}
+
+		function searchMemory(query) {
+			vscode.postMessage({ type: 'searchMemory', query });
+		}
+
+		function renderMemorySearchResults(data) {
+			const container = document.getElementById('memoryResultsList');
+			document.getElementById('memorySearchResults').style.display = 'block';
+			document.getElementById('memoryEntitiesSection').style.display = 'none';
+
+			if (!data.results || data.results.length === 0) {
+				container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 20px;">No results found for "' + escapeHtml(data.query) + '"</p>';
+				return;
+			}
+
+			let html = '';
+			for (const result of data.results) {
+				const icon = entityTypeIcons[result.type] || '📌';
+				const observations = result.observations.map(o => '<li>' + escapeHtml(o.substring(0, 100)) + '</li>').join('');
+				html += \`
+					<div class="memory-result-item">
+						<div class="memory-result-header">
+							<span class="memory-result-name">\${icon} \${escapeHtml(result.name.substring(0, 50))}</span>
+							<span class="memory-result-type">\${result.type}</span>
+						</div>
+						\${observations ? '<ul class="memory-result-observations">' + observations + '</ul>' : ''}
+					</div>
+				\`;
+			}
+			container.innerHTML = html;
+		}
+
+		function generateMemoryContext() {
+			// Show loading state
+			const preview = document.getElementById('memoryContextPreview');
+			const btn = document.querySelector('.memory-context-section .btn.outlined');
+			if (preview) {
+				preview.innerHTML = '<p class="memory-context-hint">⏳ Generating context...</p>';
+			}
+			if (btn) {
+				btn.textContent = 'Generating...';
+				btn.disabled = true;
+			}
+			vscode.postMessage({ type: 'getMemoryContext' });
+		}
+
+		function renderMemoryContext(data) {
+			const preview = document.getElementById('memoryContextPreview');
+			const btn = document.querySelector('.memory-context-section .btn.outlined');
+
+			// Reset button state
+			if (btn) {
+				btn.textContent = 'Generate Context';
+				btn.disabled = false;
+			}
+
+			if (data.context && data.context.length > 100) {
+				// Show character count
+				const charCount = data.context.length;
+				preview.innerHTML = '<div class="memory-context-stats">📊 ' + charCount.toLocaleString() + ' characters</div><pre>' + escapeHtml(data.context) + '</pre>';
+			} else {
+				preview.innerHTML = '<p class="memory-context-hint">No memory context available yet. Start chatting with Claude to build project memory.</p>';
+			}
+		}
+
+		function exportProjectMemory() {
+			vscode.postMessage({ type: 'exportMemory' });
+			// Show feedback
+			const btn = document.querySelector('.memory-actions .btn.outlined:first-child');
+			if (btn) {
+				const originalText = btn.textContent;
+				btn.textContent = 'Exporting...';
+				btn.disabled = true;
+				setTimeout(() => {
+					btn.textContent = originalText;
+					btn.disabled = false;
+				}, 2000);
+			}
+		}
+
+		let clearMemoryConfirmationShown = false;
+
+		function confirmClearMemory() {
+			if (clearMemoryConfirmationShown) {
+				return;
+			}
+			clearMemoryConfirmationShown = true;
+
+			// Try both old and new class names for compatibility
+			const actionsDiv = document.querySelector('.memory-actions-row') || document.querySelector('.memory-actions');
+			if (!actionsDiv) {
+				// If no container found, just clear directly with confirmation
+				if (confirm('Are you sure you want to clear all project memory? This cannot be undone.')) {
+					clearProjectMemory();
+					loadMemoryStats();
+				}
+				clearMemoryConfirmationShown = false;
+				return;
+			}
+
+			// Store original buttons
+			const originalButtons = actionsDiv.innerHTML;
+
+			// Create confirmation UI
+			actionsDiv.innerHTML = '';
+
+			const confirmSpan = document.createElement('span');
+			confirmSpan.style.cssText = 'color: var(--accent-red); margin-right: 12px;';
+			confirmSpan.textContent = 'Clear all memory?';
+
+			const yesBtn = document.createElement('button');
+			yesBtn.className = 'btn outlined danger';
+			yesBtn.textContent = 'Yes, Clear';
+			yesBtn.onclick = function() {
+				clearProjectMemory();
+				restoreButtons();
+				loadMemoryStats();
+			};
+
+			const cancelBtn = document.createElement('button');
+			cancelBtn.className = 'btn outlined';
+			cancelBtn.style.marginLeft = '8px';
+			cancelBtn.textContent = 'Cancel';
+			cancelBtn.onclick = function() {
+				restoreButtons();
+			};
+
+			actionsDiv.appendChild(confirmSpan);
+			actionsDiv.appendChild(yesBtn);
+			actionsDiv.appendChild(cancelBtn);
+
+			function restoreButtons() {
+				actionsDiv.innerHTML = originalButtons;
+				clearMemoryConfirmationShown = false;
+			}
+		}
+
+		function clearProjectMemory() {
+			vscode.postMessage({ type: 'clearMemory' });
+		}
+
+		// ===== Task Manager Functions =====
+		let currentTaskFilter = 'all';
+		let allTasksData = [];
+		let currentViewingTaskId = null;
+
+		function showTaskManagerModal() {
+			document.getElementById('taskManagerModal').style.display = 'flex';
+			refreshTaskList();
+			loadSessionHealth();
+		}
+
+		function hideTaskManagerModal() {
+			document.getElementById('taskManagerModal').style.display = 'none';
+			hideTaskDetails();
+		}
+
+		// Close task manager modal when clicking outside
+		document.getElementById('taskManagerModal')?.addEventListener('click', (e) => {
+			if (e.target === document.getElementById('taskManagerModal')) {
+				hideTaskManagerModal();
+			}
+		});
+
+		function loadSessionHealth() {
+			vscode.postMessage({ type: 'getSessionHealth' });
+		}
+
+		function renderSessionHealth(data) {
+			const icon = document.getElementById('sessionHealthIcon');
+			const progress = document.getElementById('sessionHealthProgress');
+			const percent = document.getElementById('sessionHealthPercent');
+			const tokens = document.getElementById('sessionTokenCount');
+			const recommendation = document.getElementById('sessionHealthRecommendation');
+			const recommendationText = document.getElementById('sessionRecommendationText');
+
+			if (icon) {
+				icon.textContent = data.status === 'healthy' ? '🟢' : data.status === 'warning' ? '🟡' : '🔴';
+			}
+
+			if (progress) {
+				progress.style.width = Math.min(data.usagePercent, 100) + '%';
+				progress.className = 'session-health-progress ' + data.status;
+			}
+
+			if (percent) {
+				percent.textContent = data.usagePercent.toFixed(1) + '%';
+			}
+
+			if (tokens) {
+				tokens.textContent = (data.sessionTokens || 0).toLocaleString();
+			}
+
+			if (recommendation && recommendationText) {
+				if (data.status !== 'healthy') {
+					recommendation.style.display = 'flex';
+					recommendationText.textContent = data.recommendation;
+				} else {
+					recommendation.style.display = 'none';
+				}
+			}
+		}
+
+		function forceNewSession() {
+			if (confirm('Start a new session? This will clear the current conversation history.')) {
+				vscode.postMessage({ type: 'forceNewSession' });
+				setTimeout(() => {
+					loadSessionHealth();
+				}, 500);
+			}
+		}
+
+		function refreshTaskList() {
+			const taskList = document.getElementById('taskList');
+			if (taskList) {
+				taskList.innerHTML = '<p class="task-list-loading">Loading tasks...</p>';
+			}
+			vscode.postMessage({ type: 'getAllTasks' });
+		}
+
+		let taskRetryCount = 0;
+		const maxTaskRetries = 3;
+
+		function renderTaskList(data) {
+			const taskList = document.getElementById('taskList');
+			if (!taskList) return;
+
+			// Check if we got an error about manager not initialized
+			if (data.error && data.error.includes('not initialized')) {
+				if (taskRetryCount < maxTaskRetries) {
+					taskRetryCount++;
+					taskList.innerHTML = \`
+						<div class="task-list-empty">
+							<div class="task-list-empty-icon">⏳</div>
+							<div class="task-list-empty-text">Initializing task manager...</div>
+							<div class="task-list-empty-hint">Attempt \${taskRetryCount}/\${maxTaskRetries}</div>
+						</div>
+					\`;
+					// Retry after a delay
+					setTimeout(() => {
+						refreshTaskList();
+					}, 1500);
+					return;
+				}
+			}
+
+			// Reset retry count on success or after max retries
+			taskRetryCount = 0;
+
+			allTasksData = data.tasks || [];
+
+			// Apply filter
+			const filteredTasks = filterTaskData(allTasksData, currentTaskFilter);
+
+			if (filteredTasks.length === 0) {
+				taskList.innerHTML = \`
+					<div class="task-list-empty">
+						<div class="task-list-empty-icon">📋</div>
+						<div class="task-list-empty-text">No tasks found</div>
+						<div class="task-list-empty-hint">Tasks are automatically extracted from your conversations</div>
+					</div>
+				\`;
+				return;
+			}
+
+			let html = '';
+			for (const task of filteredTasks) {
+				const importanceIcon = {
+					critical: '🔴',
+					high: '🟠',
+					medium: '🔵',
+					low: '⚪'
+				}[task.importance] || '⚪';
+
+				html += \`
+					<div class="task-item" onclick="viewTaskDetails('\${escapeHtml(task.id)}')">
+						<div class="task-item-header">
+							<span class="task-item-name">\${escapeHtml(task.name)}</span>
+							<span class="task-item-status \${task.status}">\${task.status}</span>
+						</div>
+						<div class="task-item-description">\${escapeHtml(task.description)}</div>
+						<div class="task-item-meta">
+							<span class="task-item-importance \${task.importance}">
+								\${importanceIcon} \${task.importance}
+							</span>
+							<span class="task-item-progress">
+								<div class="task-progress-bar">
+									<div class="task-progress-fill" style="width: \${task.progress}%"></div>
+								</div>
+								\${task.progress}%
+							</span>
+						</div>
+					</div>
+				\`;
+			}
+
+			taskList.innerHTML = html;
+		}
+
+		function filterTaskData(tasks, filter) {
+			if (filter === 'all') return tasks;
+			return tasks.filter(t => t.status === filter);
+		}
+
+		function filterTasks(filter) {
+			currentTaskFilter = filter;
+
+			// Update button states
+			document.querySelectorAll('.task-filter-btn').forEach(btn => {
+				btn.classList.toggle('active', btn.dataset.filter === filter);
+			});
+
+			// Re-render with filter
+			renderTaskList({ tasks: allTasksData });
+		}
+
+		function viewTaskDetails(taskId) {
+			currentViewingTaskId = taskId;
+			vscode.postMessage({ type: 'getTaskDetails', taskId });
+
+			// Show loading state
+			document.getElementById('taskDetailsContent').innerHTML = '<p style="color: var(--text-muted);">Loading task details...</p>';
+			document.getElementById('taskDetailsPanel').style.display = 'block';
+			document.querySelector('.task-list-section').style.display = 'none';
+			document.querySelector('.create-task-section').style.display = 'none';
+		}
+
+		function renderTaskDetails(data) {
+			const panel = document.getElementById('taskDetailsPanel');
+			const content = document.getElementById('taskDetailsContent');
+			const title = document.getElementById('taskDetailsTitle');
+
+			if (!panel || !content || !data.task) {
+				if (content) {
+					content.innerHTML = '<p style="color: var(--text-muted);">Task not found</p>';
+				}
+				return;
+			}
+
+			const task = data.task;
+			title.textContent = task.name;
+
+			const importanceIcon = {
+				critical: '🔴',
+				high: '🟠',
+				medium: '🔵',
+				low: '⚪'
+			}[task.importance] || '⚪';
+
+			let observationsHtml = '';
+			if (task.observations && task.observations.length > 0) {
+				observationsHtml = '<ul class="task-observations-list">';
+				for (const obs of task.observations) {
+					observationsHtml += '<li>' + escapeHtml(obs) + '</li>';
+				}
+				observationsHtml += '</ul>';
+			} else {
+				observationsHtml = '<p style="color: var(--text-muted);">No observations yet</p>';
+			}
+
+			let filesHtml = '';
+			if (task.relatedFiles && task.relatedFiles.length > 0) {
+				filesHtml = '<div class="task-related-files">';
+				for (const file of task.relatedFiles) {
+					filesHtml += '<span class="task-file-tag">' + escapeHtml(file) + '</span>';
+				}
+				filesHtml += '</div>';
+			} else {
+				filesHtml = '<span style="color: var(--text-muted);">None</span>';
+			}
+
+			content.innerHTML = \`
+				<div class="task-detail-row">
+					<span class="task-detail-label">Status:</span>
+					<span class="task-detail-value">
+						<span class="task-item-status \${task.status}">\${task.status}</span>
+					</span>
+				</div>
+				<div class="task-detail-row">
+					<span class="task-detail-label">Priority:</span>
+					<span class="task-detail-value">\${importanceIcon} \${task.importance}</span>
+				</div>
+				<div class="task-detail-row">
+					<span class="task-detail-label">Progress:</span>
+					<span class="task-detail-value">
+						<div class="task-progress-bar" style="width: 100px;">
+							<div class="task-progress-fill" style="width: \${task.progress}%"></div>
+						</div>
+						<span style="margin-left: 8px;">\${task.progress}%</span>
+					</span>
+				</div>
+				<div class="task-detail-row">
+					<span class="task-detail-label">Created:</span>
+					<span class="task-detail-value">\${new Date(task.createdAt).toLocaleString()}</span>
+				</div>
+				<div class="task-detail-row">
+					<span class="task-detail-label">Updated:</span>
+					<span class="task-detail-value">\${new Date(task.updatedAt).toLocaleString()}</span>
+				</div>
+				<div class="task-detail-row">
+					<span class="task-detail-label">Related Files:</span>
+					<span class="task-detail-value">\${filesHtml}</span>
+				</div>
+				<div style="margin-top: 16px;">
+					<h5 style="margin: 0 0 8px 0; font-size: 13px; color: var(--vscode-foreground);">Observations:</h5>
+					\${observationsHtml}
+				</div>
+				<div class="add-observation-section">
+					<input type="text" id="newObservationInput" class="add-observation-input" placeholder="Add observation...">
+					<button class="btn small outlined" onclick="addObservation()">Add</button>
+				</div>
+				<div class="task-actions">
+					\${task.status !== 'completed' ? '<button class="btn small primary" onclick="markTaskComplete()">Mark Complete</button>' : ''}
+					\${task.status !== 'active' ? '<button class="btn small outlined" onclick="markTaskActive()">Mark Active</button>' : ''}
+					\${task.status !== 'deprecated' ? '<button class="btn small outlined" onclick="markTaskDeprecated()">Deprecate</button>' : ''}
+				</div>
+			\`;
+		}
+
+		function hideTaskDetails() {
+			document.getElementById('taskDetailsPanel').style.display = 'none';
+			document.querySelector('.task-list-section').style.display = 'block';
+			document.querySelector('.create-task-section').style.display = 'block';
+			currentViewingTaskId = null;
+		}
+
+		function addObservation() {
+			const input = document.getElementById('newObservationInput');
+			if (!input || !input.value.trim() || !currentViewingTaskId) return;
+
+			vscode.postMessage({
+				type: 'addTaskObservation',
+				taskId: currentViewingTaskId,
+				observation: input.value.trim()
+			});
+
+			input.value = '';
+		}
+
+		function markTaskComplete() {
+			if (!currentViewingTaskId) return;
+			vscode.postMessage({
+				type: 'updateTaskStatus',
+				taskId: currentViewingTaskId,
+				status: 'completed'
+			});
+		}
+
+		function markTaskActive() {
+			if (!currentViewingTaskId) return;
+			vscode.postMessage({
+				type: 'updateTaskStatus',
+				taskId: currentViewingTaskId,
+				status: 'active'
+			});
+		}
+
+		function markTaskDeprecated() {
+			if (!currentViewingTaskId) return;
+			vscode.postMessage({
+				type: 'updateTaskStatus',
+				taskId: currentViewingTaskId,
+				status: 'deprecated'
+			});
+		}
+
+		function createNewTask() {
+			const nameInput = document.getElementById('newTaskName');
+			const descInput = document.getElementById('newTaskDescription');
+			const importanceSelect = document.getElementById('newTaskImportance');
+
+			if (!nameInput || !nameInput.value.trim()) {
+				// Show inline error instead of alert
+				showNotification('Please enter a task name', 'error');
+				return;
+			}
+
+			const taskName = nameInput.value.trim();
+			const taskDescription = descInput?.value?.trim() || taskName;
+			const taskImportance = importanceSelect?.value || 'medium';
+
+			vscode.postMessage({
+				type: 'createTask',
+				name: taskName,
+				description: taskDescription,
+				importance: taskImportance
+			});
+
+			// Clear form
+			nameInput.value = '';
+			if (descInput) descInput.value = '';
+			if (importanceSelect) importanceSelect.value = 'medium';
+
+			// Collapse the create section
+			const createSection = document.getElementById('createTaskSection');
+			if (createSection) {
+				createSection.classList.add('collapsed');
+			}
+
+			// Show success notification
+			showNotification('Task created: ' + taskName, 'success');
+
+			// Refresh task list after a short delay
+			setTimeout(() => {
+				refreshTaskList();
+			}, 300);
+		}
+
+		// Helper function to show notifications
+		function showNotification(message, type = 'info') {
+			const notification = document.createElement('div');
+			notification.className = 'notification notification-' + type;
+			notification.textContent = message;
+			notification.style.cssText = \`
+				position: fixed;
+				top: 20px;
+				right: 20px;
+				padding: 10px 16px;
+				border-radius: 8px;
+				font-size: 13px;
+				z-index: 10000;
+				animation: slideIn 0.3s ease;
+				background: \${type === 'success' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--accent-blue)'};
+				color: white;
+				box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+			\`;
+			document.body.appendChild(notification);
+			setTimeout(() => {
+				notification.style.opacity = '0';
+				notification.style.transition = 'opacity 0.3s';
+				setTimeout(() => notification.remove(), 300);
+			}, 3000);
+		}
+
+		// ===== Unified Context Manager Functions =====
+		let currentContextTab = 'overview';
+		let scratchpadItems = [];
+		let contextActivityLog = [];
+
+		function showContextManagerModal() {
+			document.getElementById('contextManagerModal').style.display = 'flex';
+			switchContextTab('overview');
+			refreshContextOverview();
+			loadMemorySettings();
+		}
+
+		function hideContextManagerModal() {
+			document.getElementById('contextManagerModal').style.display = 'none';
+		}
+
+		// Close context manager modal when clicking outside
+		document.getElementById('contextManagerModal')?.addEventListener('click', (e) => {
+			if (e.target === document.getElementById('contextManagerModal')) {
+				hideContextManagerModal();
+			}
+		});
+
+		function switchContextTab(tabName) {
+			currentContextTab = tabName;
+
+			// Update tab buttons
+			document.querySelectorAll('.context-tab').forEach(tab => {
+				tab.classList.toggle('active', tab.dataset.tab === tabName);
+			});
+
+			// Update tab content
+			document.querySelectorAll('.context-tab-content').forEach(content => {
+				content.classList.toggle('active', content.id === 'tab-' + tabName);
+			});
+
+			// Load tab-specific data
+			if (tabName === 'overview') {
+				refreshContextOverview();
+			} else if (tabName === 'memory') {
+				loadMemoryStats();
+			} else if (tabName === 'tasks') {
+				refreshTaskList();
+			} else if (tabName === 'scratchpad') {
+				// Load scratchpad items from extension (persisted to file)
+				vscode.postMessage({ type: 'getScratchpadItems' });
+				renderScratchpadList();
+			} else if (tabName === 'settings') {
+				loadMemorySettings();
+			}
+		}
+
+		function refreshContextOverview() {
+			// Load session health
+			loadSessionHealth();
+
+			// Load memory stats for quick stats
+			vscode.postMessage({ type: 'getMemoryStats' });
+
+			// Load task count for quick stats
+			vscode.postMessage({ type: 'getAllTasks' });
+
+			// Load activity log
+			loadActivityLog();
+		}
+
+		function loadActivityLog() {
+			vscode.postMessage({ type: 'getActivityLog' });
+		}
+
+		function renderActivityLog(data) {
+			const timeline = document.getElementById('ctxActivityTimeline');
+			if (!timeline) return;
+
+			contextActivityLog = data.activities || [];
+
+			if (contextActivityLog.length === 0) {
+				timeline.innerHTML = '<div class="activity-empty">No recent activity. Start chatting to build memory.</div>';
+				return;
+			}
+
+			let html = '';
+			for (const activity of contextActivityLog.slice(0, 10)) {
+				const icon = {
+					'memory_add': '🧠',
+					'task_create': '📋',
+					'task_complete': '✅',
+					'scratchpad_add': '📝',
+					'context_inject': '⚡',
+					'session_start': '🚀'
+				}[activity.type] || '📌';
+
+				const timeAgo = formatTimeAgo(new Date(activity.timestamp));
+
+				html += \`
+					<div class="activity-timeline-item">
+						<div class="activity-timeline-icon">\${icon}</div>
+						<div class="activity-timeline-content">
+							<div class="activity-timeline-text">\${escapeHtml(activity.description)}</div>
+							<div class="activity-timeline-time">\${timeAgo}</div>
+						</div>
+					</div>
+				\`;
+			}
+			timeline.innerHTML = html;
+		}
+
+		function formatTimeAgo(date) {
+			const seconds = Math.floor((new Date() - date) / 1000);
+			if (seconds < 60) return 'Just now';
+			if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+			if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+			return Math.floor(seconds / 86400) + 'd ago';
+		}
+
+		function renderContextOverviewStats(data) {
+			// Update quick stats
+			const totalEntities = document.getElementById('ctxTotalEntities');
+			if (totalEntities) {
+				totalEntities.textContent = data.totalEntities || 0;
+			}
+
+			// Update scratchpad count
+			const scratchpadCount = document.getElementById('ctxScratchpadItems');
+			if (scratchpadCount) {
+				scratchpadCount.textContent = scratchpadItems.length;
+			}
+
+			// Update Context Priority Allocation based on real data
+			updateContextPriorityAllocation(data);
+		}
+
+		// Dynamic Context Priority Allocation updater
+		function updateContextPriorityAllocation(data) {
+			// Calculate real priority distribution based on memory data
+			const totalEntities = data.totalEntities || 0;
+			const totalObservations = data.totalObservations || 0;
+			const totalRelations = data.totalRelations || 0;
+			const entitiesByType = data.entitiesByType || {};
+
+			// Calculate percentages based on actual content types
+			let criticalItems = 0;  // System rules, decisions
+			let highItems = 0;      // Active files, recent entities
+			let mediumItems = 0;    // Related context
+			let lowItems = 0;       // Background info
+
+			// Count by entity type
+			for (const [type, count] of Object.entries(entitiesByType)) {
+				const numCount = Number(count) || 0;
+				switch(type) {
+					case 'decision':
+					case 'architecture':
+					case 'pattern':
+						criticalItems += numCount;
+						break;
+					case 'file':
+					case 'task':
+					case 'bug':
+					case 'feature':
+						highItems += numCount;
+						break;
+					case 'dependency':
+					case 'conversation':
+						mediumItems += numCount;
+						break;
+					default:
+						lowItems += numCount;
+				}
+			}
+
+			// Add scratchpad items to critical (they boost attention)
+			criticalItems += scratchpadItems.length;
+
+			// Calculate total for percentages
+			const totalItems = criticalItems + highItems + mediumItems + lowItems;
+
+			// Calculate percentages (with minimums to show something)
+			let criticalPercent, highPercent, mediumPercent, lowPercent;
+
+			if (totalItems > 0) {
+				criticalPercent = Math.max(5, Math.round((criticalItems / totalItems) * 100));
+				highPercent = Math.max(10, Math.round((highItems / totalItems) * 100));
+				mediumPercent = Math.max(10, Math.round((mediumItems / totalItems) * 100));
+				lowPercent = Math.max(5, Math.round((lowItems / totalItems) * 100));
+
+				// Normalize to 100%
+				const sum = criticalPercent + highPercent + mediumPercent + lowPercent;
+				if (sum !== 100) {
+					const factor = 100 / sum;
+					criticalPercent = Math.round(criticalPercent * factor);
+					highPercent = Math.round(highPercent * factor);
+					mediumPercent = Math.round(mediumPercent * factor);
+					lowPercent = 100 - criticalPercent - highPercent - mediumPercent;
+				}
+			} else {
+				// Default distribution when no data
+				criticalPercent = 15;
+				highPercent = 35;
+				mediumPercent = 30;
+				lowPercent = 20;
+			}
+
+			// Update the UI elements
+			const priorityCritical = document.getElementById('priorityCritical');
+			const priorityHigh = document.getElementById('priorityHigh');
+			const priorityMedium = document.getElementById('priorityMedium');
+			const priorityLow = document.getElementById('priorityLow');
+
+			const criticalPercentLabel = document.getElementById('priorityCriticalPercent');
+			const highPercentLabel = document.getElementById('priorityHighPercent');
+			const mediumPercentLabel = document.getElementById('priorityMediumPercent');
+			const lowPercentLabel = document.getElementById('priorityLowPercent');
+
+			if (priorityCritical) {
+				priorityCritical.style.width = criticalPercent + '%';
+			}
+			if (priorityHigh) {
+				priorityHigh.style.width = highPercent + '%';
+			}
+			if (priorityMedium) {
+				priorityMedium.style.width = mediumPercent + '%';
+			}
+			if (priorityLow) {
+				priorityLow.style.width = lowPercent + '%';
+			}
+
+			if (criticalPercentLabel) {
+				criticalPercentLabel.textContent = criticalPercent + '%';
+			}
+			if (highPercentLabel) {
+				highPercentLabel.textContent = highPercent + '%';
+			}
+			if (mediumPercentLabel) {
+				mediumPercentLabel.textContent = mediumPercent + '%';
+			}
+			if (lowPercentLabel) {
+				lowPercentLabel.textContent = lowPercent + '%';
+			}
+		}
+
+		function renderContextSessionHealth(data) {
+			const icon = document.getElementById('ctxSessionHealthIcon');
+			const badge = document.getElementById('ctxSessionHealthBadge');
+			const progress = document.getElementById('ctxSessionHealthProgress');
+			const percent = document.getElementById('ctxSessionHealthPercent');
+			const tokensUsed = document.getElementById('ctxTokensUsed');
+			const messageCount = document.getElementById('ctxMessageCount');
+			const avgTokens = document.getElementById('ctxAvgTokens');
+			const recommendation = document.getElementById('ctxSessionRecommendation');
+			const recommendationText = document.getElementById('ctxRecommendationText');
+
+			if (icon) {
+				icon.textContent = data.status === 'healthy' ? '🟢' : data.status === 'warning' ? '🟡' : '🔴';
+			}
+
+			if (badge) {
+				badge.textContent = data.status === 'healthy' ? 'Healthy' : data.status === 'warning' ? 'Warning' : 'Critical';
+				badge.className = 'session-health-badge ' + data.status;
+			}
+
+			if (progress) {
+				const percentage = Math.min(data.usagePercent, 100);
+				progress.style.width = percentage + '%';
+				progress.className = 'session-health-progress ' + data.status;
+			}
+
+			if (percent) {
+				percent.textContent = data.usagePercent.toFixed(1) + '%';
+			}
+
+			if (tokensUsed) {
+				tokensUsed.textContent = (data.sessionTokens || 0).toLocaleString();
+			}
+
+			if (messageCount) {
+				messageCount.textContent = data.messageCount || 0;
+			}
+
+			if (avgTokens) {
+				const avg = data.messageCount > 0 ? Math.round((data.sessionTokens || 0) / data.messageCount) : 0;
+				avgTokens.textContent = avg.toLocaleString();
+			}
+
+			if (recommendation && recommendationText) {
+				if (data.status !== 'healthy') {
+					recommendation.style.display = 'flex';
+					recommendationText.textContent = data.recommendation || 'Consider starting a new session to maintain performance.';
+				} else {
+					recommendation.style.display = 'none';
+				}
+			}
+		}
+
+		function renderContextActiveTaskCount(data) {
+			const activeTasks = document.getElementById('ctxActiveTasks');
+			if (activeTasks && data.tasks) {
+				const activeCount = data.tasks.filter(t => t.status === 'active').length;
+				activeTasks.textContent = activeCount;
+			}
+		}
+
+		// Scratchpad Functions
+		function addScratchpadItem() {
+			const typeSelect = document.getElementById('scratchpadType');
+			const contentInput = document.getElementById('scratchpadContent');
+
+			if (!contentInput || !contentInput.value.trim()) return;
+
+			const item = {
+				id: Date.now().toString(),
+				type: typeSelect ? typeSelect.value : 'note',
+				content: contentInput.value.trim(),
+				createdAt: new Date().toISOString()
+			};
+
+			scratchpadItems.unshift(item);
+			contentInput.value = '';
+
+			// Save to storage
+			vscode.postMessage({ type: 'saveScratchpadItems', items: scratchpadItems });
+
+			renderScratchpadList();
+			updateScratchpadCount();
+		}
+
+		function removeScratchpadItem(itemId) {
+			scratchpadItems = scratchpadItems.filter(item => item.id !== itemId);
+			vscode.postMessage({ type: 'saveScratchpadItems', items: scratchpadItems });
+			renderScratchpadList();
+			updateScratchpadCount();
+		}
+
+		function updateScratchpadCount() {
+			const count = document.getElementById('ctxScratchpadItems');
+			if (count) {
+				count.textContent = scratchpadItems.length;
+			}
+		}
+
+		function renderScratchpadList() {
+			const list = document.getElementById('scratchpadList');
+			if (!list) return;
+
+			if (scratchpadItems.length === 0) {
+				list.innerHTML = \`
+					<div class="scratchpad-empty">
+						<span class="empty-icon">📝</span>
+						<p>No scratchpad items</p>
+						<span class="empty-hint">Add goals or notes to boost their priority in context</span>
+					</div>
+				\`;
+				return;
+			}
+
+			const typeIcons = {
+				'goal': '🎯',
+				'todo': '📌',
+				'note': '📝',
+				'decision': '✅'
+			};
+
+			let html = '';
+			for (const item of scratchpadItems) {
+				html += \`
+					<div class="scratchpad-item" data-id="\${item.id}">
+						<span class="scratchpad-item-type">\${typeIcons[item.type] || '📝'}</span>
+						<span class="scratchpad-item-content">\${escapeHtml(item.content)}</span>
+						<div class="scratchpad-item-actions">
+							<button class="scratchpad-item-btn delete" onclick="removeScratchpadItem('\${item.id}')" title="Remove">✕</button>
+						</div>
+					</div>
+				\`;
+			}
+			list.innerHTML = html;
+		}
+
+		function loadScratchpadItems(data) {
+			scratchpadItems = data.items || [];
+			renderScratchpadList();
+			updateScratchpadCount();
+		}
+
+		// Toggle Create Task Section
+		function toggleCreateTask() {
+			const section = document.getElementById('createTaskSection');
+			if (section) {
+				section.classList.toggle('collapsed');
+			}
+		}
+
+		// Close Context Preview
+		function closeContextPreview() {
+			const section = document.getElementById('memoryContextSection');
+			const entities = document.getElementById('memoryEntitiesSection');
+			if (section) section.style.display = 'none';
+			if (entities) entities.style.display = 'block';
+		}
+
+		// Advanced Engine Settings
+		function updateAdvancedEngineSettings() {
+			const useAdvanced = document.getElementById('useAdvancedEngine');
+			if (useAdvanced) {
+				vscode.postMessage({
+					type: 'updateAdvancedEngineSettings',
+					enabled: useAdvanced.checked
+				});
+			}
+		}
+
+		// Decay Settings
+		function updateDecaySettings() {
+			const halfLife = document.getElementById('decayHalfLife');
+			if (halfLife) {
+				vscode.postMessage({
+					type: 'updateDecaySettings',
+					halfLifeHours: parseInt(halfLife.value, 10) || 24
+				});
+			}
+		}
 
 		// MCP Server management functions
 		function loadMCPServers() {
@@ -1570,26 +3405,53 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				'test-generation': 'Generate comprehensive tests for this code',
 				'documentation': 'Generate documentation for this code'
 			};
-			
+
 			// Check built-in snippets first
 			let promptText = builtInSnippets[snippetType];
-			
+
 			// If not found in built-in, check custom snippets
 			if (!promptText && customSnippetsData[snippetType]) {
 				promptText = customSnippetsData[snippetType].prompt;
 			}
-			
+
 			if (promptText) {
 				// Hide the modal
 				hideSlashCommandsModal();
-				
+
 				// Insert the prompt into the message input
 				messageInput.value = promptText;
 				messageInput.focus();
-				
+
 				// Auto-resize the textarea
 				autoResizeTextarea();
 			}
+		}
+
+		// Insert context reference into message input (@ syntax for file references)
+		function insertContextReference(reference) {
+			// Hide the modal
+			hideSlashCommandsModal();
+
+			// Get current cursor position or end of text
+			const currentText = messageInput.value;
+			const cursorPos = messageInput.selectionStart || currentText.length;
+
+			// Insert reference at cursor position with a space if needed
+			const beforeText = currentText.substring(0, cursorPos);
+			const afterText = currentText.substring(cursorPos);
+			const needsSpaceBefore = beforeText.length > 0 && !beforeText.endsWith(' ') && !beforeText.endsWith('\\n');
+			const needsSpaceAfter = afterText.length > 0 && !afterText.startsWith(' ') && !afterText.startsWith('\\n');
+
+			const insertText = (needsSpaceBefore ? ' ' : '') + reference + (needsSpaceAfter ? ' ' : '');
+			messageInput.value = beforeText + insertText + afterText;
+
+			// Set cursor position after the inserted reference
+			const newCursorPos = cursorPos + insertText.length;
+			messageInput.setSelectionRange(newCursorPos, newCursorPos);
+
+			// Focus and resize
+			messageInput.focus();
+			autoResizeTextarea();
 		}
 
 		function showAddSnippetForm() {
@@ -1695,40 +3557,43 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 
 		function selectModel(model, fromBackend = false) {
 			currentModel = model;
-			
-			// Update the display text
+
+			// Update the display text with model names
 			const displayNames = {
-				'opus': 'Opus',
-				'sonnet': 'Sonnet',
-				'default': 'Model'
+				'opus': 'Opus 4.5',
+				'sonnet': 'Sonnet 4.5',
+				'haiku': 'Haiku 4.5',
+				'default': 'Default'
 			};
 			document.getElementById('selectedModel').textContent = displayNames[model] || model;
-			
+
 			// Only send model selection to VS Code extension if not from backend
 			if (!fromBackend) {
 				vscode.postMessage({
 					type: 'selectModel',
 					model: model
 				});
-				
+
 				// Save preference
 				localStorage.setItem('selectedModel', model);
 			}
-			
+
 			// Update radio button if modal is open
-			const radioButton = document.getElementById('model-' + model);
+			const radioId = 'model-' + model;
+			const radioButton = document.getElementById(radioId);
 			if (radioButton) {
 				radioButton.checked = true;
 			}
-			
+
 			hideModelModal();
 		}
 
-		// Initialize model display without sending message
-		currentModel = 'opus';
+		// Initialize model display - default to Sonnet 4.5 (recommended)
+		currentModel = 'sonnet';
 		const displayNames = {
-			'opus': 'Opus',
-			'sonnet': 'Sonnet',
+			'opus': 'Opus 4.5',
+			'sonnet': 'Sonnet 4.5',
+			'haiku': 'Haiku 4.5',
 			'default': 'Default'
 		};
 		document.getElementById('selectedModel').textContent = displayNames[currentModel];
@@ -1740,28 +3605,103 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			}
 		});
 
-		// Stop button functions
+		// Handle Send or Stop button click based on processing state
+		function handleSendOrStop() {
+			if (isProcessing) {
+				stopRequest();
+			} else {
+				sendMessage();
+			}
+		}
+
+		// Stop button functions - now transforms Send button into Stop button
 		function showStopButton() {
+			// Show the old stop button in status bar (keep for compatibility)
 			document.getElementById('stopBtn').style.display = 'flex';
+
+			// Transform Send button to Stop mode
+			const sendBtn = document.getElementById('sendBtn');
+			if (sendBtn) {
+				const sendState = sendBtn.querySelector('.send-state');
+				const stopState = sendBtn.querySelector('.stop-state');
+				if (sendState) sendState.style.display = 'none';
+				if (stopState) stopState.style.display = 'flex';
+				sendBtn.classList.add('stop-mode');
+			}
+
+			// Add shimmer wave animation to drag bar
+			const resizeHandle = document.getElementById('inputResizeHandle');
+			if (resizeHandle) {
+				resizeHandle.classList.add('processing');
+			}
 		}
 
 		function hideStopButton() {
+			// Don't hide if we're in AutoMode (planning or executing phase)
+			// This prevents timing issues during Phase 2 auto-trigger
+			if (autoModePhase === 'planning' || autoModePhase === 'executing') {
+				return; // Skip hiding - AutoMode needs stop button visible
+			}
+
+			// Hide the old stop button in status bar
 			document.getElementById('stopBtn').style.display = 'none';
+
+			// Transform Stop button back to Send mode
+			const sendBtn = document.getElementById('sendBtn');
+			if (sendBtn) {
+				const sendState = sendBtn.querySelector('.send-state');
+				const stopState = sendBtn.querySelector('.stop-state');
+				if (sendState) sendState.style.display = 'flex';
+				if (stopState) stopState.style.display = 'none';
+				sendBtn.classList.remove('stop-mode');
+			}
+
+			// Remove shimmer wave animation from drag bar
+			const resizeHandle = document.getElementById('inputResizeHandle');
+			if (resizeHandle) {
+				resizeHandle.classList.remove('processing');
+			}
+		}
+
+		// Force show stop button - used by AutoMode to guarantee UI state
+		function forceShowStopButton() {
+			document.getElementById('stopBtn').style.display = 'flex';
+
+			const sendBtn = document.getElementById('sendBtn');
+			if (sendBtn) {
+				const sendState = sendBtn.querySelector('.send-state');
+				const stopState = sendBtn.querySelector('.stop-state');
+				if (sendState) sendState.style.display = 'none';
+				if (stopState) stopState.style.display = 'flex';
+				sendBtn.classList.add('stop-mode');
+			}
+
+			const resizeHandle = document.getElementById('inputResizeHandle');
+			if (resizeHandle) {
+				resizeHandle.classList.add('processing');
+			}
 		}
 
 		function stopRequest() {
 			sendStats('Stop request');
-			
+
 			vscode.postMessage({
 				type: 'stopRequest'
 			});
 			hideStopButton();
+
+			// Reset AutoMode state on manual stop
+			autoModePhase = 'idle';
+			autoModeOriginalMessage = '';
 		}
 
 		// Disable/enable buttons during processing
 		function disableButtons() {
 			const sendBtn = document.getElementById('sendBtn');
-			if (sendBtn) sendBtn.disabled = true;
+			// Don't disable in stop mode - user needs to click to stop
+			if (sendBtn && !sendBtn.classList.contains('stop-mode')) {
+				sendBtn.disabled = true;
+			}
 		}
 
 		function enableButtons() {
@@ -1775,7 +3715,7 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			if (contentDiv) {
 				// Get text content, preserving line breaks
 				const text = contentDiv.innerText || contentDiv.textContent;
-				
+
 				// Copy to clipboard
 				navigator.clipboard.writeText(text).then(() => {
 					// Show brief feedback
@@ -1783,7 +3723,7 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 					const originalHtml = copyBtn.innerHTML;
 					copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
 					copyBtn.style.color = '#4caf50';
-					
+
 					setTimeout(() => {
 						copyBtn.innerHTML = originalHtml;
 						copyBtn.style.color = '';
@@ -1791,6 +3731,37 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				}).catch(err => {
 					console.error('Failed to copy message:', err);
 				});
+			}
+		}
+
+		// Scroll to prompt input - scrolls to show the message at the top with input visible at bottom
+		function scrollToPromptInput(messageDiv) {
+			const messagesContainer = document.getElementById('messages');
+			const inputContainer = document.getElementById('inputContainer');
+
+			if (messageDiv && messagesContainer && inputContainer) {
+				// Scroll to position the message near the input
+				messageDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+				// Visual feedback on the scroll button
+				const scrollBtn = messageDiv.querySelector('.scroll-to-prompt-btn');
+				if (scrollBtn) {
+					scrollBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+					scrollBtn.style.color = '#4caf50';
+
+					setTimeout(() => {
+						scrollBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+						scrollBtn.style.color = '';
+					}, 800);
+				}
+
+				// Focus input after scrolling
+				setTimeout(() => {
+					const messageInput = document.getElementById('messageInput');
+					if (messageInput) {
+						messageInput.focus();
+					}
+				}, 400);
 			}
 		}
 		
@@ -1820,9 +3791,111 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			}
 		}
 
+		// ===== Activity Panel Management =====
+		let activeActivities = [];
+
+		function updateActivityPanel(activities) {
+			const panel = document.getElementById('activityPanel');
+			const list = document.getElementById('activityList');
+			const count = document.getElementById('activityCount');
+
+			activeActivities = activities || [];
+
+			if (activeActivities.length === 0) {
+				panel.classList.remove('active');
+				return;
+			}
+
+			panel.classList.add('active');
+			count.textContent = activeActivities.length;
+
+			list.innerHTML = activeActivities.map(activity => {
+				const typeClass = activity.type || 'task';
+				const statusIcon = activity.status === 'completed' ? '✓' : activity.status === 'running' ? '⟳' : '○';
+				const treeItems = activity.children ? activity.children.map(child =>
+					\`<div class="activity-tree-item">
+						<span class="status-dot \${child.status === 'running' ? 'running' : ''}"></span>
+						<span>\${child.name}</span>
+						\${child.details ? \`<span style="color: var(--text-muted); font-size: 10px;">\${child.details}</span>\` : ''}
+					</div>\`
+				).join('') : '';
+
+				return \`
+					<div class="activity-item \${typeClass} \${activity.status === 'completed' ? 'completed' : ''}">
+						<div class="activity-icon">\${statusIcon}</div>
+						<div class="activity-content">
+							<div class="activity-title">\${activity.name}</div>
+							<div class="activity-details">
+								\${activity.toolUses ? \`<span class="activity-detail">🔧 \${activity.toolUses} tools</span>\` : ''}
+								\${activity.tokens ? \`<span class="activity-detail">📊 \${formatTokens(activity.tokens)}</span>\` : ''}
+								\${activity.duration ? \`<span class="activity-detail">⏱ \${activity.duration}</span>\` : ''}
+							</div>
+							\${treeItems ? \`<div class="activity-tree">\${treeItems}</div>\` : ''}
+						</div>
+					</div>
+				\`;
+			}).join('');
+		}
+
+		function formatTokens(tokens) {
+			if (tokens >= 1000) {
+				return (tokens / 1000).toFixed(1) + 'k';
+			}
+			return tokens.toString();
+		}
+
+		function addActivity(activity) {
+			activeActivities.push(activity);
+			updateActivityPanel(activeActivities);
+		}
+
+		function removeActivity(activityId) {
+			activeActivities = activeActivities.filter(a => a.id !== activityId);
+			updateActivityPanel(activeActivities);
+		}
+
+		function clearActivities() {
+			activeActivities = [];
+			updateActivityPanel([]);
+		}
+
+		// ===== Todo Panel Management =====
+		let todoItems = [];
+
+		function updateTodoPanel(todos) {
+			const panel = document.getElementById('todoPanel');
+			const list = document.getElementById('todoList');
+			const progress = document.getElementById('todoProgress');
+
+			todoItems = todos || [];
+
+			if (todoItems.length === 0) {
+				panel.classList.remove('active');
+				return;
+			}
+
+			panel.classList.add('active');
+
+			const completed = todoItems.filter(t => t.status === 'completed').length;
+			progress.textContent = \`\${completed}/\${todoItems.length}\`;
+
+			list.innerHTML = todoItems.map(todo => {
+				const statusClass = todo.status === 'completed' ? 'completed' :
+					todo.status === 'in_progress' ? 'in-progress' : '';
+				const checkmark = todo.status === 'completed' ? '✓' : '';
+
+				return \`
+					<div class="todo-item \${statusClass}">
+						<div class="todo-checkbox">\${checkmark}</div>
+						<span>\${todo.status === 'in_progress' ? todo.activeForm : todo.content}</span>
+					</div>
+				\`;
+			}).join('');
+		}
+
 		window.addEventListener('message', event => {
 			const message = event.data;
-			
+
 			switch (message.type) {
 				case 'ready':
 					addMessage(message.data, 'system');
@@ -1889,8 +3962,24 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 						disableButtons();
 					} else {
 						stopRequestTimer();
-						hideStopButton();
-						enableButtons();
+
+						// AutoMode: Check FIRST before hiding stop button
+						if (autoModePhase === 'planning') {
+							// Phase 1 complete - trigger Phase 2
+							// DON'T hide stop button - keep it visible for Phase 2
+							autoModePhase = 'executing';
+							triggerAutoModeExecution();
+						} else if (autoModePhase === 'executing') {
+							// Phase 2 complete - NOW hide everything
+							hideStopButton();
+							enableButtons();
+							autoModePhase = 'idle';
+							autoModeOriginalMessage = '';
+						} else {
+							// Normal (non-AutoMode) completion
+							hideStopButton();
+							enableButtons();
+						}
 					}
 					updateStatusWithTotals();
 					break;
@@ -1908,9 +3997,13 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 					break;
 					
 				case 'error':
+					// Clear AutoMode state on error
+					autoModePhase = 'idle';
+					autoModeOriginalMessage = '';
+
 					if (message.data.trim()) {
 						// Check if this is an install required error
-						if (message.data.includes('Install claude code first') || 
+						if (message.data.includes('Install claude code first') ||
 							message.data.includes('command not found') ||
 							message.data.includes('ENOENT')) {
 							sendStats('Install required');
@@ -2060,11 +4153,138 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 					//hideRestoreContainer(message.data.commitSha);
 					addMessage('✅ ' + message.data.message, 'system');
 					break;
+
+				case 'updateActivities':
+					// Update the activity panel with running tasks/agents
+					updateActivityPanel(message.data.activities || []);
+					break;
+
+				case 'updateTodos':
+					// Update the todo panel with current task progress
+					updateTodoPanel(message.data.todos || []);
+					break;
+
+				case 'addActivity':
+					// Add a single activity to the panel
+					addActivity(message.data);
+					break;
+
+				case 'removeActivity':
+					// Remove a completed activity
+					removeActivity(message.data.id);
+					break;
+
+				case 'clearActivities':
+					// Clear all activities (e.g., when session ends)
+					clearActivities();
+					break;
 					
 				case 'restoreError':
 					addMessage('❌ ' + message.data, 'error');
 					break;
-					
+
+				case 'restorePreview':
+					// Enhanced: Show preview modal for checkpoint restore
+					showCheckpointPreviewModal(message.data);
+					break;
+
+				case 'restorePreviewError':
+					addMessage('❌ Preview failed: ' + message.data, 'error');
+					break;
+
+				case 'checkpointsList':
+					// Handle checkpoints list if needed for UI
+					console.log('Checkpoints list received:', message.data);
+					break;
+
+				case 'checkpointStats':
+					// Handle checkpoint stats display
+					console.log('Checkpoint stats:', message.data);
+					break;
+
+				case 'checkpointsCleared':
+					addMessage('🗑️ All checkpoints have been cleared', 'system');
+					restoreBackupAvailable = false;
+					restoreBackupInfo = null;
+					updateRestoreFromBackupButton();
+					dismissRestoreFromBackupNotification();
+					break;
+
+				case 'restoreBackupStatus':
+					// Update restore backup availability
+					restoreBackupAvailable = message.data.available;
+					restoreBackupInfo = message.data.backup;
+					updateRestoreFromBackupButton();
+					if (restoreBackupAvailable && restoreBackupInfo) {
+						showRestoreFromBackupNotification();
+					} else {
+						dismissRestoreFromBackupNotification();
+					}
+					break;
+
+				case 'restoreFromBackupResult':
+					if (message.data.success) {
+						addMessage('✅ ' + message.data.message, 'system');
+						addMessage('↩️ Your code has been restored from backup.', 'system');
+					} else {
+						addMessage('❌ ' + message.data.message, 'error');
+					}
+					break;
+
+				// Context Window Management
+				case 'contextStats':
+					updateContextUsageUI(message.data);
+					break;
+
+				case 'contextCompacted':
+					hideContextCompactNotification();
+					const ratio = message.data.compressionRatio ? message.data.compressionRatio.toFixed(1) : '1.0';
+					showContextCompactNotification(
+						'Context compacted successfully',
+						\`\${message.data.messagesCompressed || 0} messages summarized • \${ratio}x compression\`
+					);
+					// Update UI with new stats
+					if (message.data.stats) {
+						updateContextUsageUI(message.data.stats);
+					}
+					break;
+
+				case 'contextCompactError':
+					hideContextCompactNotification();
+					addMessage('⚠️ Context compaction failed: ' + message.data, 'error');
+					break;
+
+				case 'contextAutoCompacting':
+					showContextCompactNotification('Auto-compacting context...', 'Context usage exceeded 95%');
+					break;
+
+				// Project Context Management
+				case 'projectContextBackupSuccess':
+					showBackupSuccess(message.data);
+					break;
+
+				case 'projectContextBackupError':
+					showBackupError(message.data);
+					break;
+
+				case 'projectContextRestorePrompt':
+					showContextRestorePrompt(message.data);
+					break;
+
+				case 'projectContextRestored':
+					showContextRestored(message.data);
+					break;
+
+				case 'projectSnapshotsList':
+					// Handle displaying the snapshots list (for view all backups)
+					displayProjectSnapshots(message.data);
+					break;
+
+				// Edit Prompt Restore
+				case 'editRestoreComplete':
+					handleEditRestoreComplete(message.data);
+					break;
+
 				case 'workspaceFiles':
 					filteredFiles = message.data;
 					selectedFileIndex = -1;
@@ -2112,9 +4332,169 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				case 'mcpServerError':
 					addMessage('❌ Error with MCP server: ' + message.data.error, 'error');
 					break;
+
+				// Documentation Manager messages
+				case 'docsList':
+					renderDocsList(message.data.docs);
+					updateDocsStats(message.data.stats);
+					break;
+				case 'docAdded':
+					loadDocs(); // Reload the docs list
+					addMessage('📚 Starting to index "' + message.data.name + '"...', 'system');
+					break;
+				case 'docProgress':
+					updateDocProgress(message.data.docId, message.data.current, message.data.total, message.data.status);
+					break;
+				case 'docIndexed':
+					loadDocs(); // Reload the docs list
+					addMessage('✅ Documentation "' + message.data.name + '" indexed successfully (' + message.data.pageCount + ' pages)', 'system');
+					break;
+				case 'docDeleted':
+					loadDocs(); // Reload the docs list
+					addMessage('🗑️ Documentation "' + message.data.name + '" deleted', 'system');
+					break;
+				case 'docError':
+					loadDocs(); // Reload to show error state
+					addMessage('❌ Error indexing documentation: ' + message.data.error, 'error');
+					break;
+
+				// Memory Management responses
+				case 'memoryStats':
+					renderMemoryStats(message.data);
+					renderContextOverviewStats(message.data);
+					break;
+				case 'memorySearchResults':
+					renderMemorySearchResults(message.data);
+					break;
+				case 'memoryContext':
+					renderMemoryContext(message.data);
+					break;
+				case 'memorySettings':
+					renderMemorySettings(message.data);
+					break;
+				case 'memorySettingsUpdated':
+					if (message.data.success) {
+						// Show brief feedback
+						const settingsSection = document.querySelector('.memory-settings-section h4');
+						if (settingsSection) {
+							const originalText = settingsSection.textContent;
+							settingsSection.textContent = '⚙️ Settings Saved ✓';
+							setTimeout(() => {
+								settingsSection.textContent = originalText;
+							}, 1500);
+						}
+					}
+					break;
+				case 'memoryCleared':
+					if (message.data.success) {
+						addMessage('🧠 Project memory cleared successfully', 'system');
+						loadMemoryStats();
+					} else {
+						addMessage('❌ Failed to clear memory: ' + (message.data.error || 'Unknown error'), 'error');
+					}
+					break;
+				case 'memoryExported':
+					if (message.data.success) {
+						if (message.data.cancelled) {
+							// User cancelled the save dialog
+							addMessage('📊 Memory stats: ' + message.data.entities + ' entities, ' + message.data.relations + ' relations (export cancelled)', 'system');
+						} else if (message.data.filePath) {
+							addMessage('📤 Memory exported to file: ' + message.data.entities + ' entities, ' + message.data.relations + ' relations saved', 'system');
+						} else {
+							addMessage('📤 Memory exported: ' + message.data.entities + ' entities, ' + message.data.relations + ' relations', 'system');
+						}
+					} else {
+						addMessage('❌ Failed to export memory: ' + (message.data.error || 'Unknown error'), 'error');
+					}
+					break;
+				case 'memoryError':
+					addMessage('❌ Memory error: ' + message.data.error, 'error');
+					break;
+				case 'memoryInjected':
+					// Show a subtle indicator that memory was used
+					showMemoryIndicator(message.data);
+					break;
+				case 'memorySystemsReady':
+					// Memory systems just finished initializing - reload data
+					console.log('Memory systems ready, reloading data...');
+					loadMemoryStats();
+					refreshTaskList();
+					break;
+
+				// Task Manager responses
+				case 'allTasks':
+					renderTaskList(message.data);
+					renderContextActiveTaskCount(message.data);
+					break;
+				case 'taskDetails':
+					renderTaskDetails(message.data);
+					break;
+				case 'taskUpdated':
+					if (message.data.success) {
+						refreshTaskList();
+						if (currentViewingTaskId === message.data.taskId) {
+							viewTaskDetails(message.data.taskId);
+						}
+					}
+					break;
+				case 'taskCreated':
+					if (message.data.success) {
+						refreshTaskList();
+						addMessage('✅ Task created successfully', 'system');
+					} else {
+						addMessage('❌ Failed to create task', 'error');
+					}
+					break;
+				case 'observationAdded':
+					if (message.data.success && currentViewingTaskId) {
+						viewTaskDetails(currentViewingTaskId);
+					}
+					break;
+				case 'taskError':
+					addMessage('❌ Task error: ' + message.data.error, 'error');
+					break;
+
+				// Session Health responses
+				case 'sessionHealth':
+					renderSessionHealth(message.data);
+					renderContextSessionHealth(message.data);
+					break;
+				case 'sessionHealthWarning':
+					// Show warning when session is getting too long
+					if (message.data.status === 'critical') {
+						addMessage('⚠️ Session context is nearly full (' + message.data.usagePercent.toFixed(0) + '%). ' + message.data.recommendation, 'system');
+					}
+					break;
+				case 'sessionForceCleared':
+					addMessage('🔄 Started new session: ' + message.data.reason, 'system');
+					break;
+
+				// Context Manager responses
+				case 'activityLog':
+					renderActivityLog(message.data);
+					break;
+				case 'scratchpadItems':
+					loadScratchpadItems(message.data);
+					break;
 			}
 		});
-		
+
+		// Show memory injection indicator
+		function showMemoryIndicator(data) {
+			// Update the memory button to show it's active
+			const memoryBtn = document.querySelector('.memory-btn');
+			if (memoryBtn) {
+				memoryBtn.classList.add('memory-active');
+				memoryBtn.title = \`Project Memory Active: \${data.entities} entities, \${data.observations} observations (\${Math.round(data.contextSize/1000)}KB)\`;
+
+				// Remove the active class after 3 seconds
+				setTimeout(() => {
+					memoryBtn.classList.remove('memory-active');
+					memoryBtn.title = 'Project Memory';
+				}, 3000);
+			}
+		}
+
 		// Permission request functions
 		function addPermissionRequestMessage(data) {
 			const messagesDiv = document.getElementById('messages');
@@ -2244,14 +4624,103 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			}
 		});
 
+		// Input container resize functionality
+		(function initInputResize() {
+			const resizeHandle = document.getElementById('inputResizeHandle');
+			const inputContainer = document.getElementById('inputContainer');
+			const messageInput = document.getElementById('messageInput');
+
+			if (!resizeHandle || !inputContainer || !messageInput) return;
+
+			let isResizing = false;
+			let startY = 0;
+			let startHeight = 0;
+			const minHeight = 68;
+			const maxHeight = 400;
+
+			// Load saved height from localStorage
+			const savedHeight = localStorage.getItem('inputContainerHeight');
+			if (savedHeight) {
+				const height = parseInt(savedHeight, 10);
+				if (height >= minHeight && height <= maxHeight) {
+					messageInput.style.minHeight = height + 'px';
+					messageInput.style.height = height + 'px';
+				}
+			}
+
+			resizeHandle.addEventListener('mousedown', function(e) {
+				isResizing = true;
+				startY = e.clientY;
+				startHeight = messageInput.offsetHeight;
+				resizeHandle.classList.add('dragging');
+				document.body.style.cursor = 'ns-resize';
+				document.body.style.userSelect = 'none';
+				e.preventDefault();
+			});
+
+			document.addEventListener('mousemove', function(e) {
+				if (!isResizing) return;
+
+				const deltaY = startY - e.clientY;
+				let newHeight = startHeight + deltaY;
+
+				// Clamp height between min and max
+				newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+
+				messageInput.style.minHeight = newHeight + 'px';
+				messageInput.style.height = newHeight + 'px';
+			});
+
+			document.addEventListener('mouseup', function() {
+				if (isResizing) {
+					isResizing = false;
+					resizeHandle.classList.remove('dragging');
+					document.body.style.cursor = '';
+					document.body.style.userSelect = '';
+
+					// Save height to localStorage
+					const currentHeight = messageInput.offsetHeight;
+					localStorage.setItem('inputContainerHeight', currentHeight.toString());
+				}
+			});
+		})();
+
 		// Session management functions
 		function newSession() {
+			console.log('newSession function called');
 			sendStats('New chat');
-			
+
 			vscode.postMessage({
 				type: 'newSession'
 			});
 		}
+
+		// Attach event listener for New Chat button
+		document.addEventListener('DOMContentLoaded', function() {
+			const newSessionBtn = document.getElementById('newSessionBtn');
+			if (newSessionBtn) {
+				newSessionBtn.addEventListener('click', function(e) {
+					e.preventDefault();
+					console.log('New Session button clicked via addEventListener');
+					newSession();
+				});
+			}
+		});
+
+		// Also attach immediately in case DOMContentLoaded already fired
+		(function attachNewSessionHandler() {
+			const newSessionBtn = document.getElementById('newSessionBtn');
+			if (newSessionBtn) {
+				newSessionBtn.onclick = function(e) {
+					e.preventDefault();
+					console.log('New Session button clicked via onclick');
+					newSession();
+				};
+			}
+		})();
+
+		// Enhanced Checkpoint Variables
+		let currentRestorePreview = null;
 
 		function restoreToCommit(commitSha) {
 			console.log('Restore button clicked for commit:', commitSha);
@@ -2261,26 +4730,259 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			});
 		}
 
+		// Enhanced: Preview restore before executing
+		function previewRestore(checkpointId) {
+			console.log('Preview restore for checkpoint:', checkpointId);
+			vscode.postMessage({
+				type: 'previewRestore',
+				checkpointId: checkpointId
+			});
+		}
+
+		// Enhanced: Confirm restore with options
+		function confirmRestore(checkpointId, createBackup = false) {
+			console.log('Confirm restore for checkpoint:', checkpointId, 'createBackup:', createBackup);
+			hideCheckpointPreviewModal();
+			vscode.postMessage({
+				type: 'confirmRestore',
+				checkpointId: checkpointId,
+				options: {
+					createBackupBeforeRestore: createBackup
+				}
+			});
+		}
+
 		function showRestoreContainer(data) {
 			const messagesDiv = document.getElementById('messages');
 			const shouldScroll = shouldAutoScroll(messagesDiv);
-			
+
 			const restoreContainer = document.createElement('div');
-			restoreContainer.className = 'restore-container';
+			const isEnhanced = data.enhanced === true;
+			restoreContainer.className = isEnhanced ? 'restore-container enhanced' : 'restore-container';
 			restoreContainer.id = \`restore-\${data.sha}\`;
-			
+
 			const timeAgo = new Date(data.timestamp).toLocaleTimeString();
 			const shortSha = data.sha ? data.sha.substring(0, 8) : 'unknown';
-			
-			restoreContainer.innerHTML = \`
-				<button class="restore-btn dark" onclick="restoreToCommit('\${data.sha}')">
-					Restore checkpoint
-				</button>
-				<span class="restore-date">\${timeAgo}</span>
-			\`;
-			
+
+			// Enhanced checkpoint display with file count
+			if (isEnhanced && data.fileCount !== undefined) {
+				const fileCountText = data.changedFiles && data.changedFiles.length > 0
+					? \`\${data.changedFiles.length} files tracked\`
+					: 'No file changes';
+
+				restoreContainer.innerHTML = \`
+					<button class="restore-btn dark" onclick="previewRestore('\${data.id || data.sha}')">
+						<span class="restore-btn-icon">⏪</span>
+						Restore checkpoint
+					</button>
+					<div class="restore-info">
+						<span class="restore-date">\${timeAgo}</span>
+						<span class="restore-file-count">\${fileCountText}</span>
+					</div>
+					<button class="restore-preview-btn" onclick="previewRestore('\${data.id || data.sha}')" title="Preview changes">
+						👁️ Preview
+					</button>
+				\`;
+			} else {
+				// Legacy checkpoint display
+				restoreContainer.innerHTML = \`
+					<button class="restore-btn dark" onclick="restoreToCommit('\${data.sha}')">
+						Restore checkpoint
+					</button>
+					<span class="restore-date">\${timeAgo}</span>
+				\`;
+			}
+
 			messagesDiv.appendChild(restoreContainer);
 			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+		}
+
+		// Enhanced: Show checkpoint preview modal
+		function showCheckpointPreviewModal(data) {
+			currentRestorePreview = data;
+
+			// Create modal if it doesn't exist
+			let modal = document.getElementById('checkpointPreviewModal');
+			if (!modal) {
+				modal = document.createElement('div');
+				modal.id = 'checkpointPreviewModal';
+				modal.className = 'checkpoint-preview-modal';
+				document.body.appendChild(modal);
+			}
+
+			const checkpoint = data.checkpoint || {};
+			const filesToRestore = data.filesToRestore || [];
+			const filesToDelete = data.filesToDelete || [];
+			const currentChanges = data.currentChanges || [];
+			const totalChanges = data.totalChanges || 0;
+			const isLegacy = data.legacyMode === true;
+
+			// Count changes by type
+			const addedCount = currentChanges.filter(c => c.type === 'added').length;
+			const modifiedCount = currentChanges.filter(c => c.type === 'modified').length;
+			const deletedCount = currentChanges.filter(c => c.type === 'deleted').length;
+
+			// Build file list HTML
+			let filesListHtml = '';
+			if (currentChanges.length > 0) {
+				filesListHtml = currentChanges.slice(0, 50).map(change => {
+					const statusClass = change.type;
+					const statusLabel = change.type.charAt(0).toUpperCase() + change.type.slice(1);
+					return \`
+						<div class="checkpoint-file-item \${statusClass}">
+							<span class="checkpoint-file-status \${statusClass}">\${statusLabel}</span>
+							<span class="checkpoint-file-path">\${change.path}</span>
+						</div>
+					\`;
+				}).join('');
+
+				if (currentChanges.length > 50) {
+					filesListHtml += \`<div class="checkpoint-file-item">... and \${currentChanges.length - 50} more files</div>\`;
+				}
+			} else if (isLegacy) {
+				filesListHtml = '<div class="checkpoint-file-item">Preview not available in legacy mode</div>';
+			} else {
+				filesListHtml = '<div class="checkpoint-file-item">No changes to revert</div>';
+			}
+
+			modal.innerHTML = \`
+				<div class="checkpoint-preview-content">
+					<div class="checkpoint-preview-header">
+						<h3>Restore Checkpoint</h3>
+						<button class="tools-close-btn" onclick="hideCheckpointPreviewModal()">✕</button>
+					</div>
+					<div class="checkpoint-preview-body">
+						<div class="checkpoint-message-label">Checkpoint Message</div>
+						<div class="checkpoint-message">\${checkpoint.message || 'No message'}</div>
+
+						<div class="checkpoint-changes-summary">
+							<div class="checkpoint-change-stat restore">
+								<div class="checkpoint-stat-number">\${filesToRestore.length}</div>
+								<div class="checkpoint-stat-label">Files to Restore</div>
+							</div>
+							<div class="checkpoint-change-stat delete">
+								<div class="checkpoint-stat-number">\${filesToDelete.length}</div>
+								<div class="checkpoint-stat-label">Files to Remove</div>
+							</div>
+							<div class="checkpoint-change-stat modify">
+								<div class="checkpoint-stat-number">\${totalChanges}</div>
+								<div class="checkpoint-stat-label">Total Changes</div>
+							</div>
+						</div>
+
+						\${totalChanges > 0 ? \`
+						<div class="checkpoint-files-list">
+							<div class="checkpoint-files-header">
+								📁 Files that will be affected
+							</div>
+							\${filesListHtml}
+						</div>
+						\` : ''}
+
+						<div class="checkpoint-warning">
+							<span class="checkpoint-warning-icon">⚠️</span>
+							<span class="checkpoint-warning-text">
+								This will revert all changes made after this checkpoint.
+								\${isLegacy ? 'This is a legacy checkpoint - detailed preview is not available.' : 'Your current work will be backed up automatically.'}
+							</span>
+						</div>
+					</div>
+					<div class="checkpoint-preview-actions">
+						<button class="checkpoint-btn cancel" onclick="hideCheckpointPreviewModal()">Cancel</button>
+						<button class="checkpoint-btn restore-backup" onclick="confirmRestore('\${checkpoint.id || checkpoint.sha}', true)">
+							💾 Restore (Keep Backup)
+						</button>
+						<button class="checkpoint-btn restore" onclick="confirmRestore('\${checkpoint.id || checkpoint.sha}', false)">
+							⏪ Restore Now
+						</button>
+					</div>
+				</div>
+			\`;
+
+			modal.style.display = 'flex';
+		}
+
+		function hideCheckpointPreviewModal() {
+			const modal = document.getElementById('checkpointPreviewModal');
+			if (modal) {
+				modal.style.display = 'none';
+			}
+			currentRestorePreview = null;
+		}
+
+		// Restore From Backup - undo a restore operation
+		function restoreFromBackup() {
+			if (!restoreBackupAvailable) {
+				addMessage('No restore backup available. Use "Restore (Keep Backup)" first to create a backup.', 'error');
+				return;
+			}
+
+			console.log('Restoring from backup...');
+			vscode.postMessage({
+				type: 'restoreFromBackup'
+			});
+		}
+
+		// Check if restore backup is available
+		function checkRestoreBackupAvailable() {
+			vscode.postMessage({
+				type: 'checkRestoreBackupAvailable'
+			});
+		}
+
+		// Update the restore from backup button visibility
+		function updateRestoreFromBackupButton() {
+			const btn = document.getElementById('restoreFromBackupBtn');
+			if (btn) {
+				if (restoreBackupAvailable && restoreBackupInfo) {
+					btn.style.display = 'inline-flex';
+					btn.title = 'Restore to: ' + (restoreBackupInfo.message || 'Previous backup');
+				} else {
+					btn.style.display = 'none';
+				}
+			}
+		}
+
+		// Show restore from backup notification
+		function showRestoreFromBackupNotification() {
+			if (!restoreBackupAvailable || !restoreBackupInfo) return;
+
+			const messagesDiv = document.getElementById('messages');
+			const shouldScroll = shouldAutoScroll(messagesDiv);
+
+			// Check if notification already exists
+			let notification = document.getElementById('restoreFromBackupNotification');
+			if (!notification) {
+				notification = document.createElement('div');
+				notification.id = 'restoreFromBackupNotification';
+				notification.className = 'restore-from-backup-notification';
+				messagesDiv.appendChild(notification);
+			}
+
+			const timestamp = new Date(restoreBackupInfo.timestamp).toLocaleTimeString();
+			notification.innerHTML = \`
+				<div class="restore-from-backup-content">
+					<span class="restore-from-backup-icon">💾</span>
+					<div class="restore-from-backup-text">
+						<strong>Backup Available</strong>
+						<span>Your code before restore was saved at \${timestamp}</span>
+					</div>
+					<button class="restore-from-backup-btn" onclick="restoreFromBackup()">
+						↩️ Restore From Backup
+					</button>
+					<button class="restore-from-backup-dismiss" onclick="dismissRestoreFromBackupNotification()">✕</button>
+				</div>
+			\`;
+			notification.style.display = 'block';
+
+			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+		}
+
+		function dismissRestoreFromBackupNotification() {
+			const notification = document.getElementById('restoreFromBackupNotification');
+			if (notification) {
+				notification.style.display = 'none';
+			}
 		}
 
 		function hideRestoreContainer(commitSha) {
@@ -2289,7 +4991,659 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				container.remove();
 			}
 		}
-		
+
+		// ==================== Context Window Management Functions ====================
+
+		function updateContextUsageUI(stats) {
+			contextStats = stats;
+			contextUsagePercent = Math.round(stats.usagePercent * 100);
+
+			const circle = document.getElementById('contextCircleProgress');
+			const text = document.getElementById('contextUsageText');
+			const remainingText = document.getElementById('contextRemainingText');
+			const autoCompactText = document.getElementById('contextAutoCompactText');
+
+			if (!circle || !text) return;
+
+			// Update circle progress (stroke-dasharray: progress, remaining)
+			const progress = Math.min(contextUsagePercent, 100);
+			circle.setAttribute('stroke-dasharray', \`\${progress}, 100\`);
+
+			// Update text
+			text.textContent = \`\${contextUsagePercent}%\`;
+
+			// Update color based on usage level
+			circle.classList.remove('warning', 'critical');
+			if (contextUsagePercent >= 95) {
+				circle.classList.add('critical');
+			} else if (contextUsagePercent >= 85) {
+				circle.classList.add('warning');
+			}
+
+			// Update tooltip
+			const remainingPercent = Math.max(0, 100 - contextUsagePercent);
+			const untilAutoCompact = Math.max(0, 95 - contextUsagePercent);
+
+			if (remainingText) {
+				remainingText.textContent = \`\${remainingPercent}% remaining\`;
+			}
+
+			if (autoCompactText) {
+				if (contextUsagePercent >= 95) {
+					autoCompactText.textContent = 'Auto-compact active';
+				} else {
+					autoCompactText.textContent = \`\${untilAutoCompact}% until auto-compact\`;
+				}
+			}
+		}
+
+		function showContextInfo() {
+			// Toggle tooltip visibility or show modal with more details
+			const tooltip = document.getElementById('contextUsageTooltip');
+			if (tooltip) {
+				const isVisible = tooltip.style.display === 'block';
+				tooltip.style.display = isVisible ? 'none' : 'block';
+			}
+		}
+
+		function manualCompactContext() {
+			console.log('Manual context compaction requested');
+
+			// Show compacting notification
+			showContextCompactNotification('Compacting conversation context...');
+
+			vscode.postMessage({
+				type: 'compactContext',
+				manual: true
+			});
+		}
+
+		function showContextCompactNotification(message, details) {
+			const messagesDiv = document.getElementById('messages');
+			const shouldScroll = shouldAutoScroll(messagesDiv);
+
+			// Remove any existing notification
+			const existing = document.getElementById('contextCompactNotification');
+			if (existing) {
+				existing.remove();
+			}
+
+			const notification = document.createElement('div');
+			notification.id = 'contextCompactNotification';
+			notification.className = 'context-compact-notification';
+			notification.innerHTML = \`
+				<div class="compact-icon">📦</div>
+				<div class="compact-text">
+					<strong>\${message}</strong>
+					\${details ? \`<span>\${details}</span>\` : ''}
+				</div>
+			\`;
+
+			messagesDiv.appendChild(notification);
+			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+
+			// Auto-hide after 5 seconds
+			setTimeout(() => {
+				if (notification.parentNode) {
+					notification.style.opacity = '0';
+					notification.style.transition = 'opacity 0.3s ease';
+					setTimeout(() => notification.remove(), 300);
+				}
+			}, 5000);
+		}
+
+		function hideContextCompactNotification() {
+			const notification = document.getElementById('contextCompactNotification');
+			if (notification) {
+				notification.remove();
+			}
+		}
+
+		// Request initial context stats
+		function requestContextStats() {
+			vscode.postMessage({
+				type: 'getContextStats'
+			});
+		}
+
+		// ===== Project Context Backup Functions =====
+
+		function backupProjectContext() {
+			console.log('Backup project context requested');
+
+			const btn = document.getElementById('backupContextBtn');
+			if (btn) {
+				btn.classList.add('saving');
+				btn.setAttribute('title', 'Saving context...');
+			}
+
+			vscode.postMessage({
+				type: 'backupProjectContext',
+				manual: true
+			});
+		}
+
+		function showBackupSuccess(snapshot) {
+			const btn = document.getElementById('backupContextBtn');
+			if (btn) {
+				btn.classList.remove('saving');
+				btn.classList.add('success');
+				btn.setAttribute('title', 'Context saved!');
+
+				setTimeout(() => {
+					btn.classList.remove('success');
+					btn.setAttribute('title', 'Backup Project Context');
+				}, 2000);
+			}
+
+			// Show notification in chat
+			showContextBackupNotification(
+				'Project context saved!',
+				snapshot ? \`Saved \${snapshot.messageCount || 0} messages from this session.\` : 'Your conversation has been backed up.',
+				snapshot?.id
+			);
+		}
+
+		function showBackupError(error) {
+			const btn = document.getElementById('backupContextBtn');
+			if (btn) {
+				btn.classList.remove('saving');
+				btn.setAttribute('title', 'Backup Project Context');
+			}
+
+			// Show error notification
+			showContextBackupNotification(
+				'Failed to backup context',
+				error || 'An error occurred while saving the context.',
+				null,
+				true
+			);
+		}
+
+		function showContextBackupNotification(title, message, snapshotId, isError = false) {
+			const messagesDiv = document.getElementById('messages');
+			const shouldScroll = shouldAutoScroll(messagesDiv);
+
+			// Remove any existing notification
+			const existing = document.getElementById('contextBackupNotification');
+			if (existing) {
+				existing.remove();
+			}
+
+			const notification = document.createElement('div');
+			notification.id = 'contextBackupNotification';
+			notification.className = 'context-backup-notification';
+			if (isError) {
+				notification.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.1) 100%)';
+				notification.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+			}
+
+			notification.innerHTML = \`
+				<div class="backup-icon">\${isError ? '❌' : '💾'}</div>
+				<div class="backup-text">
+					<strong style="color: \${isError ? '#ef4444' : '#22c55e'}">\${title}</strong>
+					<span>\${message}</span>
+					\${snapshotId ? \`<div class="backup-actions">
+						<button onclick="viewProjectSnapshots()">View All Backups</button>
+					</div>\` : ''}
+				</div>
+			\`;
+
+			messagesDiv.appendChild(notification);
+			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+
+			// Auto-hide after 6 seconds
+			setTimeout(() => {
+				if (notification.parentNode) {
+					notification.style.opacity = '0';
+					notification.style.transition = 'opacity 0.3s ease';
+					setTimeout(() => notification.remove(), 300);
+				}
+			}, 6000);
+		}
+
+		function viewProjectSnapshots() {
+			vscode.postMessage({
+				type: 'viewProjectSnapshots'
+			});
+		}
+
+		function showContextRestorePrompt(snapshot) {
+			const messagesDiv = document.getElementById('messages');
+			if (!messagesDiv) return;
+
+			// Remove any existing prompt
+			const existing = document.getElementById('contextRestorePrompt');
+			if (existing) {
+				existing.remove();
+			}
+
+			const formattedDate = new Date(snapshot.timestamp).toLocaleString();
+			const prompt = document.createElement('div');
+			prompt.id = 'contextRestorePrompt';
+			prompt.className = 'context-restore-prompt';
+			prompt.innerHTML = \`
+				<div class="restore-header">
+					<span class="restore-icon">🔄</span>
+					<h4>Previous Context Available</h4>
+				</div>
+				<div class="restore-body">
+					A saved context was found from your previous session. Would you like to restore it?
+					<div class="snapshot-info">
+						<div>
+							<span>Saved:</span>
+							<span>\${formattedDate}</span>
+						</div>
+						<div>
+							<span>Messages:</span>
+							<span>\${snapshot.messageCount || 0}</span>
+						</div>
+						<div>
+							<span>Type:</span>
+							<span>\${snapshot.type === 'auto' ? 'Auto-saved' : 'Manual backup'}</span>
+						</div>
+					</div>
+				</div>
+				<div class="restore-actions">
+					<button class="btn-restore" onclick="restoreProjectContext('\${snapshot.id}')">
+						Restore Context
+					</button>
+					<button class="btn-skip" onclick="skipContextRestore()">
+						Start Fresh
+					</button>
+				</div>
+			\`;
+
+			// Insert at the beginning of messages
+			messagesDiv.insertBefore(prompt, messagesDiv.firstChild);
+		}
+
+		function restoreProjectContext(snapshotId) {
+			// Remove the prompt
+			const prompt = document.getElementById('contextRestorePrompt');
+			if (prompt) {
+				prompt.remove();
+			}
+
+			// Show restoring message
+			const messagesDiv = document.getElementById('messages');
+			const restoringMsg = document.createElement('div');
+			restoringMsg.className = 'context-backup-notification';
+			restoringMsg.innerHTML = \`
+				<div class="backup-icon">⏳</div>
+				<div class="backup-text">
+					<strong>Restoring context...</strong>
+					<span>Loading your previous conversation.</span>
+				</div>
+			\`;
+			messagesDiv.appendChild(restoringMsg);
+
+			vscode.postMessage({
+				type: 'restoreProjectContext',
+				snapshotId: snapshotId
+			});
+
+			// Remove restoring message after a short delay
+			setTimeout(() => {
+				if (restoringMsg.parentNode) {
+					restoringMsg.remove();
+				}
+			}, 2000);
+		}
+
+		function skipContextRestore() {
+			const prompt = document.getElementById('contextRestorePrompt');
+			if (prompt) {
+				prompt.style.opacity = '0';
+				prompt.style.transition = 'opacity 0.3s ease';
+				setTimeout(() => prompt.remove(), 300);
+			}
+
+			vscode.postMessage({
+				type: 'skipContextRestore'
+			});
+		}
+
+		function showContextRestored(result) {
+			const notification = document.createElement('div');
+			notification.className = 'context-backup-notification';
+			notification.innerHTML = \`
+				<div class="backup-icon">✅</div>
+				<div class="backup-text">
+					<strong style="color: #22c55e">Context restored!</strong>
+					<span>\${result.messageCount || 0} messages loaded from your previous session.</span>
+				</div>
+			\`;
+
+			const messagesDiv = document.getElementById('messages');
+			messagesDiv.appendChild(notification);
+
+			setTimeout(() => {
+				if (notification.parentNode) {
+					notification.style.opacity = '0';
+					notification.style.transition = 'opacity 0.3s ease';
+					setTimeout(() => notification.remove(), 300);
+				}
+			}, 4000);
+		}
+
+		function displayProjectSnapshots(snapshots) {
+			// Show list of backups (could open a quick pick or modal)
+			if (!snapshots || snapshots.length === 0) {
+				addMessage('📭 No project context backups found.', 'info');
+				return;
+			}
+
+			// For now, show a simple list in the chat
+			let listHtml = '<div class="context-backup-notification" style="flex-direction: column; align-items: stretch;">';
+			listHtml += '<div class="backup-text" style="margin-bottom: 10px;"><strong>📚 Available Context Backups</strong></div>';
+			listHtml += '<div style="max-height: 200px; overflow-y: auto;">';
+
+			snapshots.forEach((snapshot, index) => {
+				const date = new Date(snapshot.timestamp).toLocaleString();
+				const typeLabel = snapshot.type === 'auto' ? '🔄 Auto' : '💾 Manual';
+				listHtml += \`
+					<div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; background: var(--vscode-editor-background); border-radius: 4px; margin-bottom: 4px;">
+						<div>
+							<div style="font-size: 11px; color: var(--vscode-foreground);">\${typeLabel} - \${date}</div>
+							<div style="font-size: 10px; color: var(--vscode-descriptionForeground);">\${snapshot.messageCount || 0} messages</div>
+						</div>
+						<button onclick="restoreProjectContext('\${snapshot.id}')" style="background: #3b82f6; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;">
+							Restore
+						</button>
+					</div>
+				\`;
+			});
+
+			listHtml += '</div></div>';
+
+			const messagesDiv = document.getElementById('messages');
+			const listDiv = document.createElement('div');
+			listDiv.innerHTML = listHtml;
+			messagesDiv.appendChild(listDiv.firstChild);
+		}
+
+		// ===== Edit Prompt Functions =====
+
+		function enterEditPromptMode(messageDiv) {
+			// Don't allow edit if already processing
+			if (isProcessRunning) {
+				return;
+			}
+
+			// Exit any existing edit mode
+			if (editingMessageDiv) {
+				exitEditPromptMode(false);
+			}
+
+			editingMessageDiv = messageDiv;
+			const contentDiv = messageDiv.querySelector('.message-content');
+			if (!contentDiv) return;
+
+			// Store original content (get text content, not HTML)
+			originalMessageContent = contentDiv.textContent || contentDiv.innerText || '';
+
+			// Get the message index for this message
+			const msgIndex = messageDiv.getAttribute('data-message-index');
+
+			// Hide the original content and show edit UI
+			contentDiv.style.display = 'none';
+
+			// Create edit container
+			const editContainer = document.createElement('div');
+			editContainer.className = 'edit-prompt-container';
+			editContainer.id = 'editPromptContainer';
+
+			// Create textarea with original content
+			const textarea = document.createElement('textarea');
+			textarea.className = 'edit-prompt-textarea';
+			textarea.id = 'editPromptTextarea';
+			textarea.value = originalMessageContent;
+			textarea.placeholder = 'Edit your prompt...';
+
+			// Create button container
+			const buttonContainer = document.createElement('div');
+			buttonContainer.className = 'edit-prompt-buttons';
+
+			// Cancel button
+			const cancelBtn = document.createElement('button');
+			cancelBtn.className = 'edit-prompt-cancel-btn';
+			cancelBtn.textContent = 'Cancel';
+			cancelBtn.onclick = () => exitEditPromptMode(false);
+
+			// Submit & Restore button
+			const submitBtn = document.createElement('button');
+			submitBtn.className = 'edit-prompt-submit-btn';
+			submitBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Submit & Restore';
+			submitBtn.onclick = () => submitEditedPrompt(msgIndex);
+
+			// Warning text
+			const warningText = document.createElement('div');
+			warningText.className = 'edit-prompt-warning';
+			warningText.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg> This will restore all files and remove messages after this prompt';
+
+			buttonContainer.appendChild(cancelBtn);
+			buttonContainer.appendChild(submitBtn);
+
+			editContainer.appendChild(textarea);
+			editContainer.appendChild(warningText);
+			editContainer.appendChild(buttonContainer);
+
+			// Insert after the header
+			const headerDiv = messageDiv.querySelector('.message-header');
+			if (headerDiv) {
+				headerDiv.after(editContainer);
+			} else {
+				messageDiv.appendChild(editContainer);
+			}
+
+			// Focus the textarea and put cursor at end
+			textarea.focus();
+			textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+			// Auto-resize textarea
+			autoResizeEditTextarea(textarea);
+			textarea.addEventListener('input', () => autoResizeEditTextarea(textarea));
+
+			// Add escape key handler
+			textarea.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape') {
+					exitEditPromptMode(false);
+				}
+				// Ctrl/Cmd + Enter to submit
+				if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+					submitEditedPrompt(msgIndex);
+				}
+			});
+
+			// Add editing class to message for styling
+			messageDiv.classList.add('editing');
+
+			console.log('Entered edit mode for message index:', msgIndex);
+		}
+
+		function autoResizeEditTextarea(textarea) {
+			textarea.style.height = 'auto';
+			textarea.style.height = Math.min(textarea.scrollHeight, 300) + 'px';
+		}
+
+		function exitEditPromptMode(keepChanges = false) {
+			if (!editingMessageDiv) return;
+
+			const editContainer = document.getElementById('editPromptContainer');
+			const contentDiv = editingMessageDiv.querySelector('.message-content');
+
+			if (editContainer) {
+				editContainer.remove();
+			}
+
+			if (contentDiv) {
+				contentDiv.style.display = '';
+			}
+
+			editingMessageDiv.classList.remove('editing');
+			editingMessageDiv = null;
+			originalMessageContent = '';
+
+			console.log('Exited edit mode');
+		}
+
+		function submitEditedPrompt(msgIndex) {
+			if (!editingMessageDiv) return;
+
+			const textarea = document.getElementById('editPromptTextarea');
+			if (!textarea) return;
+
+			const editedContent = textarea.value.trim();
+			if (!editedContent) {
+				// Don't submit empty prompt
+				return;
+			}
+
+			console.log('Submitting edited prompt for message index:', msgIndex);
+			console.log('Edited content:', editedContent.substring(0, 100) + '...');
+
+			// Show loading state on submit button
+			const submitBtn = editingMessageDiv.querySelector('.edit-prompt-submit-btn');
+			if (submitBtn) {
+				submitBtn.disabled = true;
+				submitBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" class="spin" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Restoring...';
+			}
+
+			// Send message to extension to handle the edit & restore
+			vscode.postMessage({
+				type: 'editAndRestorePrompt',
+				messageIndex: parseInt(msgIndex),
+				editedContent: editedContent,
+				originalContent: originalMessageContent
+			});
+		}
+
+		function handleEditRestoreComplete(data) {
+			console.log('Edit restore complete:', data);
+
+			if (!data.success) {
+				// Show error
+				const submitBtn = editingMessageDiv?.querySelector('.edit-prompt-submit-btn');
+				if (submitBtn) {
+					submitBtn.disabled = false;
+					submitBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Submit & Restore';
+				}
+				addMessage('Failed to restore: ' + (data.error || 'Unknown error'), 'error');
+				exitEditPromptMode(false);
+				return;
+			}
+
+			// Get the message index that was edited
+			const editedMsgIndex = data.messageIndex;
+			const editedContent = data.editedContent;
+
+			// Exit edit mode first
+			exitEditPromptMode(false);
+
+			// Remove all messages starting from the edited message (including it)
+			removeMessagesFromIndex(editedMsgIndex);
+
+			// Reset message index counter to one less than the edited message
+			// so when the new message is sent, it gets the correct index
+			messageIndex = editedMsgIndex - 1;
+
+			// Show success notification
+			showEditRestoreNotification(data);
+
+			// Now send the edited message after a short delay to allow UI to update
+			setTimeout(() => {
+				console.log('Auto-submitting edited message...');
+				sendEditedMessage(editedContent);
+			}, 600);
+		}
+
+		function removeMessagesFromIndex(msgIndex) {
+			const messagesDiv = document.getElementById('messages');
+			if (!messagesDiv) return;
+
+			// Get all direct children of messages div
+			const allElements = Array.from(messagesDiv.children);
+			let targetElement = null;
+			let targetElementIndex = -1;
+
+			// First, find the target user message by data-message-index
+			for (let i = 0; i < allElements.length; i++) {
+				const el = allElements[i];
+				const index = el.getAttribute('data-message-index');
+				if (index && parseInt(index) === msgIndex) {
+					targetElement = el;
+					targetElementIndex = i;
+					break;
+				}
+			}
+
+			if (targetElementIndex === -1) {
+				console.log('Target message not found, nothing to remove');
+				return;
+			}
+
+			// Remove all elements from the target onwards
+			const toRemove = allElements.slice(targetElementIndex);
+
+			console.log(\`Found target at index \${targetElementIndex}, removing \${toRemove.length} elements\`);
+
+			// Remove the elements with animation
+			toRemove.forEach((el, i) => {
+				el.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+				el.style.opacity = '0';
+				el.style.transform = 'translateX(20px)';
+				setTimeout(() => {
+					if (el.parentNode) {
+						el.remove();
+					}
+				}, 200);
+			});
+
+			console.log(\`Removed \${toRemove.length} messages/elements from index \${msgIndex}\`);
+		}
+
+		function sendEditedMessage(content) {
+			console.log('Sending edited message:', content.substring(0, 50) + '...');
+
+			// Use the existing send message flow
+			const messageInput = document.getElementById('messageInput');
+			if (messageInput) {
+				messageInput.value = content;
+				// Adjust textarea height
+				adjustTextareaHeight();
+				// Trigger send using the correct function name
+				sendMessage();
+			}
+		}
+
+		function showEditRestoreNotification(data) {
+			const messagesDiv = document.getElementById('messages');
+			const shouldScroll = shouldAutoScroll(messagesDiv);
+
+			const notification = document.createElement('div');
+			notification.className = 'edit-restore-notification';
+			notification.innerHTML = \`
+				<div class="restore-icon">🔄</div>
+				<div class="restore-text">
+					<strong>Files restored & messages cleared</strong>
+					<span>\${data.filesRestored || 0} files restored to previous state</span>
+				</div>
+			\`;
+
+			messagesDiv.appendChild(notification);
+			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
+
+			// Auto-hide after 4 seconds
+			setTimeout(() => {
+				if (notification.parentNode) {
+					notification.style.opacity = '0';
+					notification.style.transition = 'opacity 0.3s ease';
+					setTimeout(() => notification.remove(), 300);
+				}
+			}, 4000);
+		}
+
 		function showSessionInfo(sessionId) {
 			// const sessionInfo = document.getElementById('sessionInfo');
 			// const sessionIdSpan = document.getElementById('sessionId');
@@ -2495,11 +5849,12 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		}
 
 		function loadConversation(filename) {
+			console.log('loadConversation called with filename:', filename);
 			vscode.postMessage({
 				type: 'loadConversation',
 				filename: filename
 			});
-			
+
 			// Hide conversation history and show chat
 			toggleConversationHistory();
 		}
@@ -2649,7 +6004,8 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			conversations.forEach(conv => {
 				const item = document.createElement('div');
 				item.className = 'conversation-item';
-				item.onclick = () => loadConversation(conv.filename);
+				item.setAttribute('data-filename', conv.filename);
+				item.style.cursor = 'pointer';
 
 				const date = new Date(conv.startTime).toLocaleDateString();
 				const time = new Date(conv.startTime).toLocaleTimeString();
@@ -2660,8 +6016,19 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 					<div class="conversation-preview">Last: \${conv.lastUserMessage.substring(0, 80)}\${conv.lastUserMessage.length > 80 ? '...' : ''}</div>
 				\`;
 
+				// Use addEventListener for reliable click handling
+				item.addEventListener('click', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					const filename = this.getAttribute('data-filename');
+					console.log('Conversation item clicked, filename:', filename);
+					loadConversation(filename);
+				});
+
 				listDiv.appendChild(item);
 			});
+
+			console.log('Displayed', conversations.length, 'conversations');
 		}
 
 		function handleClipboardText(text) {
@@ -2870,6 +6237,13 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		document.getElementById('thinkingIntensityModal').addEventListener('click', (e) => {
 			if (e.target === document.getElementById('thinkingIntensityModal')) {
 				hideThinkingIntensityModal();
+			}
+		});
+
+		// Close plan mode modal when clicking outside
+		document.getElementById('planModeModal').addEventListener('click', (e) => {
+			if (e.target === document.getElementById('planModeModal')) {
+				hidePlanModeModal();
 			}
 		});
 

@@ -1,347 +1,497 @@
-# 🚀 Claude Code Chat - Beautiful Claude Code Chat Interface for VS Code
+# Claude CodeUI by NexaLance
 
-[![VS Code Extension](https://img.shields.io/badge/VS%20Code-Extension-blue?style=for-the-badge&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=andrepimenta.claude-code-chat)
-[![Claude Code](https://img.shields.io/badge/Powered%20by-Claude%20Code-orange?style=for-the-badge)](https://claude.ai/code)
-[![TypeScript](https://img.shields.io/badge/Built%20with-TypeScript-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
+> **An Enterprise-Grade VS Code Extension for Claude Code CLI**
 
-> **No more terminal commands. Chat with Claude Code through a beautiful, intuitive interface right inside VS Code.**
+Transform your VS Code into a powerful AI-assisted development environment with a beautiful, feature-rich chat interface.
 
-Ditch the command line and experience Claude Code like never before. This extension brings a stunning chat interface directly into your editor, making AI assistance accessible, visual, and enjoyable.
-
-🤖 **Built by Claude Code for Claude Code** - This extension was entirely developed using Claude Code itself. Claude Code created its own chat interface!
-
----
-
-## ✨ **Why Choose Claude Code Chat?**
-
-🖥️ **No Terminal Required** - Beautiful chat interface replaces command-line interactions  
-⏪ **Restore Checkpoints** - Undo changes and restore code to any previous state   
-🔌 **MCP Server Support** - Complete Model Context Protocol server management   
-💾 **Conversation History** - Automatic conversation history and session management  
-🎨 **VS Code Native** - Claude Code integrated directly into VS Code with native theming and sidebar support  
-🧠 **Plan and Thinking modes** - Plan First and configurable Thinking modes for better results  
-⚡ **Smart File/Image Context and Custom Commands** - Reference any file, paste images or screenshots and create custom commands  
-🤖 **Model Selection** - Choose between Opus, Sonnet, or Default based on your needs  
-🐧 **Windows/WSL Support** - Full native Windows and WSL support
-
-![Claude Code Chat 1 0 0](https://github.com/user-attachments/assets/5954a74c-eff7-4205-8482-6a1c9de6e102)
-
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/developerjillur/claude-codeUI-by-nexalance)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.94.0+-green.svg)](https://code.visualstudio.com/)
+[![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://www.typescriptlang.org/)
+[![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-30%2C000%2B-brightgreen.svg)](#architecture--code-quality)
 
 ---
 
-## 🌟 **Key Features**
+## Acknowledgments & Credits
 
-### 💬 **Beautiful Chat Graphical Interface**
-- No terminal required - everything through the UI
+This extension is built upon the excellent foundation of **[claude-code-chat](https://github.com/andrepimenta/claude-code-chat)** by **[Andre Pimenta](https://github.com/andrepimenta)**.
+
+We extend our sincere gratitude to Andre Pimenta for creating the original extension that inspired this enhanced version. The original project provided the core architecture and concept that made Claude CodeUI by NexaLance possible.
+
+| | Original | Enhanced |
+|---|---|---|
+| **Project** | [claude-code-chat](https://github.com/andrepimenta/claude-code-chat) | [Claude CodeUI by NexaLance](https://github.com/developerjillur/claude-codeUI-by-nexalance) |
+| **Author** | Andre Pimenta | Developer Jillur |
+| **GitHub** | [@andrepimenta](https://github.com/andrepimenta) | [@developerjillur](https://github.com/developerjillur) |
+
+---
+
+## What's New in Claude CodeUI by NexaLance
+
+### Major Enhancements Over Original
+
+| Feature | Original | Claude CodeUI by NexaLance |
+|---------|----------|---------------------------|
+| **Memory System** | Basic | Advanced Knowledge Graph with Inverted Index (O(1) search) |
+| **Checkpoint System** | Basic Git | SHA-256 Hashing, 20,000+ file support |
+| **Context Management** | Manual | Auto-compression at 90%, Token Tracking |
+| **Type Safety** | Partial | 50+ TypeScript Interfaces, Strict Mode |
+| **Performance** | Standard | LRU Caching, Debouncing, Lazy Loading |
+| **Verification** | None | Self-Verification Engine with Code Lint |
+| **Documentation** | Manual | Auto-indexing Documentation Manager |
+| **Code Size** | ~5,000 lines | 30,000+ lines |
+
+### New Manager Systems (8 Modules)
+
+1. **Advanced Context Engine** - Priompt-inspired priority-based context management
+2. **Project Memory Manager** - Knowledge graph with 11 entity types
+3. **Smart Memory Manager** - Intelligent token budgeting and injection
+4. **Checkpoint Manager** - Enhanced with SHA-256 caching
+5. **Context Window Manager** - Auto-compression and optimization
+6. **Project Context Manager** - Session persistence with auto-save
+7. **Self-Verification Engine** - Response validation and quality scoring
+8. **Documentation Manager** - External docs indexing and search
+
+---
+
+## Overview
+
+Claude CodeUI by NexaLance provides a beautiful, intuitive interface for Claude Code CLI right inside VS Code. No more terminal commands - chat with Claude through a modern, feature-rich interface.
+
+### Key Highlights
+
+- **30,000+ lines** of enterprise-grade TypeScript code
+- **8 specialized manager systems** for different concerns
+- **50+ TypeScript interfaces** for comprehensive type safety
+- **Zero runtime dependencies** (only dev dependencies)
+- **Persistent memory** that remembers your project across sessions
+- **Intelligent context management** that prevents token overflow
+- **Self-verification** that validates responses before delivery
+
+---
+
+## Prerequisites
+
+Before using this extension, install **Claude Code CLI**:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Or visit: [Claude Code Installation Guide](https://www.anthropic.com/claude-code)
+
+---
+
+## Installation
+
+### From VSIX File
+1. Download the latest `.vsix` file from [Releases](https://github.com/developerjillur/claude-codeUI-by-nexalance/releases)
+2. Open VS Code
+3. Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS)
+4. Type "Install from VSIX" and select the downloaded file
+
+### From Source
+```bash
+git clone https://github.com/developerjillur/claude-codeUI-by-nexalance.git
+cd claude-codeUI-by-nexalance
+npm install
+npm run compile
+npx vsce package --no-dependencies
+```
+
+---
+
+## Features
+
+### 1. Beautiful Chat Interface
+- Clean, modern UI with dark theme optimized for VS Code
+- Tree-style message formatting with bullet points
+- Syntax highlighting for code blocks
+- One-click code copy functionality
 - Real-time streaming responses with typing indicators
-- One-click message copying with visual feedback
-- Enhanced markdown support with syntax highlighting
-- Auto-resizing input that grows with your content
-- Copy-to-clipboard for code blocks
+- Message separation with subtle borders
+- Activity panel showing running tasks
+- Todo progress tracking panel
 
-### ⏪ **Checkpoint & Session Management**
-- **Restore Checkpoints** - Instantly undo changes and restore to any previous state
-- Automatic Git-based backup system for safe experimentation
-- Browse and restore from any conversation checkpoint
-- Automatic conversation saving and restoration
-- Real-time cost and token tracking
-- Session statistics and performance metrics
+### 2. Model Selection
 
-### 🔌 **MCP Server Management** ⭐ **NEW IN V1.0**
-- **Popular Servers Gallery** - One-click installation of common MCP servers
-- **Custom Server Creation** - Build and configure your own MCP servers
-- **Server Management** - Edit, delete, enable/disable servers through UI
-- **Automatic Integration** - Seamless permissions and tool integration
-- **Cross-platform Support** - Full WSL compatibility with path conversion
+| Model | Description | Cost per 1M tokens |
+|-------|-------------|-------------------|
+| **Opus 4.5** | Most powerful for complex reasoning | $5 (input) / $25 (output) |
+| **Sonnet 4.5** | Balanced performance (Recommended) | $3 / $15 |
+| **Haiku 4.5** | Fast and cost-efficient | $0.80 / $4 |
 
-### 🔒 **Advanced Permissions System** ⭐ **NEW IN V1.0**
-- **Interactive Permission Dialogs** - Detailed tool information with command previews
-- **Always Allow Functionality** - Smart command pattern matching for common tools (npm, git, docker)
-- **YOLO Mode** - Skip all permission checks for power users
-- **Workspace Permissions** - Granular control over what tools can execute
-- **Real-time Permission Management** - Add/remove permissions through intuitive UI
+### 3. Thinking Mode Intensity
+Configure how deeply Claude thinks through problems:
+- `think` - Standard reasoning
+- `think-hard` - More detailed analysis
+- `think-harder` - Comprehensive reasoning
+- `ultrathink` - Maximum reasoning depth
 
-### 🖼️ **Image & Clipboard Support** ⭐ **NEW IN V1.0**
-- **Drag & Drop Images** - Simply drag images directly into the chat
-- **Clipboard Paste** - Press Ctrl+V to paste screenshots and copied images
-- **Multiple Image Selection** - Choose multiple images through VS Code's file picker
-- **Organized Storage** - Automatic organization in `.claude/claude-code-chat-images/`
-- **Format Support** - PNG, JPG, JPEG, GIF, SVG, WebP, BMP formats
+### 4. Advanced Checkpoint System
+Never lose your work with our enterprise-grade checkpoint system:
 
-### 📱 **Sidebar Integration** ⭐ **NEW IN V1.0**
-- **Native VS Code Sidebar** - Full chat functionality in the sidebar panel
-- **Smart Panel Management** - Automatic switching between main and sidebar views
-- **Persistent Sessions** - State maintained across panel switches
-- **Activity Bar Integration** - Quick access from VS Code's activity bar
+- **Automatic Checkpoints** - Saves project state during conversations
+- **File Tracking** - Tracks 20,000+ files with SHA-256 hashing
+- **One-Click Restore** - Restore to any previous checkpoint
+- **Preview Changes** - See changes before restoring
+- **Backup Protection** - Creates backup before any restore
+- **Undo Restore** - Revert if needed
+- **Git-based Storage** - Reliable version control
+- **Incremental Mode** - Efficient change detection
 
-### 📁 **Smart File Integration**
-- Type `@` to instantly search and reference workspace files
-- Image attachments via file browser and copy-paste screeshots
-- Lightning-fast file search across your entire project
-- Seamless context preservation for multi-file discussions
+### 5. Project Memory System
+Claude remembers your project context across sessions:
 
-### 🛠️ **Tool Management**
-- Visual dashboard showing all available Claude Code tools
-- Real-time tool execution with formatted results
-- Process control - start, stop, and monitor operations
-- Smart permission system for secure tool execution
+- **Knowledge Graph** - Entities and relationships stored as graph
+- **11 Entity Types** - project, task, file, decision, pattern, bug, feature, dependency, architecture, conversation, milestone
+- **Inverted Index Search** - O(1) lookup performance
+- **JSONL Storage** - Reliable append-only format
+- **Auto-injection** - Relevant context automatically provided
+- **Memory Export** - Backup and restore project memory
+- **Observation Deduplication** - Efficient storage
 
-### 🎨 **VS Code Integration**
-- Native theming that matches your editor
-- Status bar integration with connection status
-- Activity bar panel for quick access
-- Responsive design for any screen size
+### 6. Context Window Management
+Intelligent context optimization:
 
-### 🤖 **Model Selection**
-- **Opus** - Most capable model for complex tasks requiring deep reasoning
-- **Sonnet** - Balanced model offering great performance for most use cases
-- **Default** - Uses your configured model setting
-- Model preference persists across sessions and is saved automatically
-- Easy switching via dropdown selector in the chat interface
-- Visual confirmation when switching between models
-- One-click model configuration through integrated terminal
+- **Token Tracking** - Real-time usage monitoring
+- **Auto-compression** - At 90% usage with 50-60% compression ratio
+- **Smart Summarization** - Preserves critical information
+- **Model-aware Limits** - Automatic adjustment based on model
+- **Priority Preservation** - Critical context never lost
 
-### ⚡ **Slash Commands Integration**
-- **Slash Commands Modal** - Type "/" to access all Claude Code commands instantly
-- **23+ Built-in Commands** - /agents, /cost, /config, /memory, /review, and more
-- **Custom Command Support** - Execute any Claude Code command with session context
-- **Session-Aware Execution** - All commands run with current conversation context
-- **Terminal Integration** - Commands open directly in VS Code terminal with WSL support
+### 7. Project Context Persistence
+Your conversations are never lost:
 
-### 🧠 **Advanced AI Modes**
-- **Plan First Mode** - Toggle to make Claude plan before implementing changes
-- **Thinking Mode** - Configurable intensity levels (Think, Think Hard, Think Harder, Ultrathink)
-- **Mode Toggles** - Simple switches above the text input area
-- **Intelligent Prompting** - Different prompts based on selected thinking intensity
-- **Token Awareness** - Higher thinking levels consume more tokens but provide deeper reasoning
+- **Session Persistence** - Saved to `.claude/context/`
+- **Auto-save** - Every 30 seconds with race condition protection
+- **Context Snapshots** - Manual backups anytime
+- **Quick Restoration** - One-click restore
+- **AI-generated Summaries** - Quick session overview
 
----
+### 8. Documentation Manager
+Manage external documentation for Claude:
 
-## 🚀 **Getting Started**
+- **URL Indexing** - Add documentation URLs
+- **Smart Crawling** - Automatic indexing
+- **Cross-doc Search** - Search all indexed docs
+- **@Docs Reference** - Use in prompts
 
-### Prerequisites
-- **VS Code 1.80+** - Latest version recommended
-- **Claude Code CLI** - [Install from Anthropic](https://claude.ai/code)
-- **Active Claude API or subscription** - API or Pro/Max plan
+### 9. MCP Server Integration
+Full Model Context Protocol support:
 
-### Installation
+- **Server Management** - Add, edit, remove servers
+- **Popular Servers** - One-click setup for common servers
+- **Environment Variables** - Server-specific configuration
+- **Connection Status** - Monitor server health
 
-1. **Install from VS Code Marketplace**
-   ```
-   ext install claude-code-chat
-   ```
+### 10. Permission Management
 
-2. **Or install manually**
-   - Download the `.vsix` file from releases
-   - Run `code --install-extension claude-code-chat-x.x.x.vsix`
+| Mode | Description |
+|------|-------------|
+| `Default` | Read-only, asks before modifications |
+| `Plan Mode` | Analyze without modifying |
+| `Accept Edits` | Auto-approve file edits |
+| `Bypass Permissions` | Skip all prompts (use with caution) |
 
-3. **Open Claude Code Chat**
-   - Press `Ctrl+Shift+C` (or `Cmd+Shift+C` on Mac)
-   - Or click the Claude icon in your status bar
-   - Or use Command Palette: `Claude Code: Open Chat`
+Additional options:
+- **YOLO Mode** - Unrestricted operation
+- **Granular Permissions** - Allow specific tools
 
----
+### 11. Conversation History
+- **History Browser** - Browse past conversations
+- **Search** - Find specific conversations
+- **Load & Continue** - Resume any conversation
+- **Export** - Export for reference
 
-## 💡 **Usage Examples**
+### 12. File & Image Support
+- **File References** - Use `@` to reference files
+- **Image Attachments** - Attach images for context
+- **Workspace Search** - Quick file search with LRU caching
+- **Drag & Drop** - Drop files into chat
+- **Clipboard Paste** - Paste images with Ctrl+V
 
-### 🔥 **Code Review & Refactoring**
-```
-You: @src/components/UserProfile.tsx Can you review this component and suggest improvements?
+### 13. Slash Commands
+23+ built-in commands including:
+- `/agents` - Manage AI agents
+- `/cost` - Calculate API costs
+- `/config` - Configuration management
+- `/memory` - Memory system control
+- `/review` - Code review
+- `/add-dir` - Add working directories
+- `/rewind` - Rewind conversation/code
+- `/usage` - Show usage limits
 
-Claude: I'll analyze your UserProfile component. Looking at the code, here are my recommendations:
+### 14. WSL Integration
+Full Windows Subsystem for Linux support:
+- Configure WSL distribution
+- Custom Node.js and Claude paths
+- Seamless Linux environment integration
 
-1. **Performance Optimization**: Add React.memo() to prevent unnecessary re-renders
-2. **TypeScript Enhancement**: The props interface could be more specific
-3. **Accessibility**: Missing ARIA labels for screen readers
-
-[Detailed analysis with code examples follows...]
-```
-
-### 📊 **Project Analysis**
-```
-You: Analyze the overall architecture of my project and identify potential issues
-
-Claude: I'll examine your project structure and identify areas for improvement:
-
-🏗️ **Architecture Overview**
-- React frontend with TypeScript
-- Node.js backend with Express
-- MongoDB database layer
-
-⚠️ **Identified Issues**
-- Missing error boundaries in React components
-- Database queries lack proper indexing
-- API routes missing input validation
-
-[Detailed recommendations with implementation examples...]
-```
-
-### 🐛 **Debugging Assistant**
-```
-You: I'm getting a strange error in my API. Here's the stack trace: [paste error]
-
-Claude: Looking at this stack trace, the issue appears to be a race condition in your async middleware. Here's what's happening:
-
-1. **Root Cause**: Multiple requests are modifying shared state
-2. **Solution**: Implement proper request isolation
-3. **Prevention**: Add comprehensive error handling
-
-[Step-by-step debugging guide follows...]
-```
-
-### ⏪ **Safe Experimentation with Checkpoints**
-```
-You: Can you refactor this entire component to use hooks instead of class components?
-
-Claude: I'll refactor your component to use React hooks. Don't worry - I'll create a checkpoint first so you can easily restore if needed.
-
-[Creates automatic checkpoint]
-
-Here's the refactored component using hooks:
-[Shows the new implementation]
-
-If you want to revert these changes, just click "Restore Checkpoint" to go back to your original code instantly.
-```
+### 15. Enhanced UI/UX
+- **Stop Button** - Properly terminates running prompts
+- **Loading Indicators** - Clear operation feedback
+- **Error Messages** - Helpful suggestions
+- **Keyboard Shortcuts** - `Ctrl+Shift+C` / `Cmd+Shift+C`
+- **Status Bar** - Shows current model
+- **Touch Bar** - macOS support
+- **Sidebar Integration** - Full chat in sidebar
 
 ---
 
-## ⚙️ **Configuration**
+## Advanced Features
 
-### Keyboard Shortcuts
+### Advanced Context Engine
+Inspired by research from Anthropic, Manus AI, LangChain, Mem0, and Cursor:
+
+- **Priority-based Management** - Priompt-like priority system
+- **Multi-tier Priorities** - Critical > High > Medium > Low > Disposable
+- **Memory Decay** - Older context gradually deprioritized
+- **Graph-based Memory** - Mem0-style with conflict detection
+- **Semantic Chunking** - Intelligent content segmentation
+- **KV-Cache Awareness** - Optimized for Claude's architecture
+- **Self-verification Integration** - Validated responses
+
+### Self-Verification Engine
+- **Response Validation** - Checks for common issues
+- **Code Lint Integration** - VS Code diagnostics integration
+- **Consistency Checking** - Aligns with project context
+- **Self-correction** - Proposes fixes for detected issues
+- **Quality Scoring** - Rates response quality (0-100)
+
+### Smart Memory Manager
+- **Prompt Analysis** - Classifies intent (task, question, code, fix, review)
+- **Keyword Extraction** - Identifies relevant keywords
+- **Entity Linking** - Links to project entities
+- **Token Budgeting** - Prevents "prompt too long" errors
+- **Relevance Selection** - Injects only necessary context
+
+---
+
+## Configuration Options
+
+Access via `File > Preferences > Settings > Claude CodeUI by NexaLance`
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `claudeCodeChat.model.default` | `sonnet` | Default Claude model |
+| `claudeCodeChat.model.maxTokens` | `16384` | Max output tokens (1024-128000) |
+| `claudeCodeChat.thinking.intensity` | `think` | Thinking mode intensity |
+| `claudeCodeChat.permissions.mode` | `default` | Permission mode |
+| `claudeCodeChat.permissions.yoloMode` | `false` | Enable YOLO mode |
+| `claudeCodeChat.memory.autoInject` | `true` | Auto-inject project memory |
+| `claudeCodeChat.memory.maxContextSize` | `4000` | Max memory context chars |
+| `claudeCodeChat.plan.mode` | `ask` | Planning mode |
+| `claudeCodeChat.wsl.enabled` | `false` | Enable WSL integration |
+| `claudeCodeChat.wsl.distro` | `Ubuntu` | WSL distribution |
+| `claudeCodeChat.wsl.nodePath` | `/usr/bin/node` | Node.js path in WSL |
+| `claudeCodeChat.wsl.claudePath` | `/usr/local/bin/claude` | Claude path in WSL |
+
+---
+
+## Keyboard Shortcuts
+
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Shift+C` | Open Claude Code Chat |
+| `Ctrl+Shift+C` / `Cmd+Shift+C` | Open Claude CodeUI |
 | `Enter` | Send message |
+| `Shift+Enter` | New line in input |
 | `@` | Open file picker |
-| `/` | Open slash commands modal |
+| `/` | Open slash commands |
+| `Escape` | Close modals |
 
-### WSL Configuration (Windows Users)
-If you're using Claude Code through WSL (Windows Subsystem for Linux), you can configure the extension to use WSL:
+---
 
-1. Open VS Code Settings (`Ctrl+,` or `Cmd+,`)
-2. Search for "Claude Code Chat"
-3. Configure these settings:
-   - **Claude Code Chat: WSL Enabled** - Enable WSL integration
-   - **Claude Code Chat: WSL Distro** - Your WSL distribution name (e.g., `Ubuntu`, `Debian`)
-   - **Claude Code Chat: WSL Node Path** - Path to Node.js in WSL (default: `/usr/bin/node`)
-   - **Claude Code Chat: WSL Claude Path** - Path to Claude in WSL (default: `/usr/local/bin/claude`)
+## Architecture & Code Quality
 
-Example configuration in `settings.json`:
-```json
-{
-  "claudeCodeChat.wsl.enabled": true,
-  "claudeCodeChat.wsl.distro": "Ubuntu",
-  "claudeCodeChat.wsl.nodePath": "/usr/bin/node",
-  "claudeCodeChat.wsl.claudePath": "/usr/local/bin/claude"
-}
+### Code Organization
+```
+src/
+├── extension.ts              # Main entry point (4,961 lines)
+├── types.ts                  # TypeScript definitions (828 lines, 50+ interfaces)
+├── utils.ts                  # Utilities (663 lines)
+├── ui.ts                     # Webview HTML (1,492 lines)
+├── ui-styles.ts              # CSS styles (7,490 lines)
+├── script.ts                 # Frontend JavaScript (6,337 lines)
+├── checkpointManager.ts      # Checkpoint system (1,080 lines)
+├── projectMemoryManager.ts   # Memory system (1,638 lines)
+├── smartMemoryManager.ts     # Smart injection (813 lines)
+├── projectContextManager.ts  # Context persistence (1,036 lines)
+├── contextWindowManager.ts   # Token management (1,094 lines)
+├── advancedContextEngine.ts  # Context engine (1,523 lines)
+├── selfVerificationEngine.ts # Verification (850 lines)
+└── docsManager.ts            # Documentation (851 lines)
+```
+
+### Storage Structure
+```
+.claude/
+├── memory/
+│   ├── memory.jsonl          # Entity store (append-only)
+│   ├── memory-index.json     # Inverted search index
+│   ├── memory-graph.json     # Relationship graph
+│   └── scratchpad.json       # Active context
+├── context/
+│   ├── sessions/             # Conversation sessions
+│   └── snapshots/            # Manual backups
+├── checkpoints/
+│   ├── index.json            # Checkpoint metadata
+│   ├── hash-cache.json       # SHA-256 cache
+│   └── backups/              # Checkpoint data
+├── agents/                   # AI agent definitions
+├── commands/                 # Slash commands
+├── hooks/                    # Python lifecycle hooks
+├── docs/                     # Indexed documentation
+└── skills/                   # Skill definitions
+```
+
+### Type Safety
+- Full TypeScript with strict mode
+- 50+ typed interfaces
+- No `any` types in critical paths
+- Comprehensive type definitions
+
+### Performance Optimizations
+- **LRU Caching** - 30-second TTL for workspace files
+- **Debouncing** - 150ms for search operations
+- **Throttling** - Rate-limited async operations
+- **Inverted Index** - O(1) memory search
+- **Lazy Initialization** - On-demand resource loading
+- **File Hash Caching** - SHA-256 change detection
+- **Auto-save Locking** - Race condition prevention
+
+### Error Handling
+- Comprehensive error boundaries
+- Safe async operation wrappers
+- User-friendly error messages
+- Automatic retry with exponential backoff
+- Proper dispose patterns
+- No memory leaks
+
+---
+
+## Usage Examples
+
+### Code Review
+```
+You: @src/components/UserProfile.tsx Can you review this component?
+
+Claude: I'll analyze your UserProfile component...
+[Detailed analysis with suggestions]
+```
+
+### Safe Experimentation
+```
+You: Refactor this to use React hooks
+
+Claude: I'll create a checkpoint first so you can restore if needed.
+[Creates automatic checkpoint]
+[Shows refactored implementation]
+
+Click "Restore Checkpoint" to revert if needed.
+```
+
+### Project Analysis
+```
+You: Analyze the architecture of my project
+
+Claude: I'll examine your project structure...
+[Comprehensive architecture overview]
 ```
 
 ---
 
-## 🎯 **Pro Tips & Tricks**
+## Troubleshooting
 
-### 🔥 **File Context Magic**
-- Type `@` followed by your search term to quickly reference files
-- Use `@src/` to narrow down to specific directories
-- Reference multiple files in one message for cross-file analysis
-- **NEW**: Copy-paste images directly into chat for visual context
-- **NEW**: Paste screenshots with Ctrl+V for instant visual communication
-
-### ⚡ **Productivity Boosters**
-- **Creates checkpoints automatically** before changes for safe experimentation
-- **Restore instantly** if changes don't work out as expected
-- **NEW**: Permission system prevents accidental tool execution
-- **NEW**: YOLO mode for power users who want speed over safety
-- Use the stop button to cancel long-running operations
-- Copy message contents to reuse Claude's responses
-- Open history panel to reference previous conversations
-- **NEW**: Sidebar integration for multi-panel workflow
-
-### 🎨 **Interface Customization**
-- The UI automatically adapts to your VS Code theme
-- Messages are color-coded: Green for you, Blue for Claude
-- Hover over messages to reveal the copy button
-- **NEW**: Enhanced code block rendering with syntax highlighting
-- **NEW**: Copy-to-clipboard functionality for code blocks
-
----
-
-## 🔧 **Advanced Features**
-
-### 🛠️ **Tool Integration**
-Claude Code Chat provides secure access to all Claude Code tools:
-- **Bash** - Execute shell commands with permission controls
-- **File Operations** - Read, write, and edit files
-- **Search** - Grep and glob pattern matching across workspace
-- **Web** - Fetch and search web content
-- **Multi-edit** - Batch file modifications
-- **MCP Servers** - Extend functionality with Model Context Protocol servers
-- **Permissions System** - Granular control over tool execution for security
-
-### 📊 **Analytics & Monitoring**
-- **Real-time cost tracking** - Monitor your API usage
-- **Token consumption** - See input/output token counts
-- **Response timing** - Track performance metrics
-- **Session statistics** - Comprehensive usage analytics
-
-### ⏪ **Checkpoint System**
-- **Instant restoration** - One-click restore to any previous state
-- **Conversation checkpoints** - Every change creates a restore point
-- **Visual timeline** - See and navigate through all your project states
-
-### 🔄 **Conversation History**
-- **Automatic saving** - Every conversation is preserved
-- **Smart restoration** - Resume exactly where you left off
-- **Switch between chats** - Easily check and switch to previous conversations
-
----
-
-## 🤝 **Contributing**
-
-We welcome contributions! Here's how you can help:
-
-1. **🐛 Report Bugs** - Use our issue tracker
-2. **💡 Suggest Features** - Share your ideas
-3. **🔧 Submit PRs** - Help us improve the codebase
-4. **📚 Improve Docs** - Make the documentation better
-
-### Development Setup
+### Claude not found
 ```bash
-git clone https://github.com/andrepimenta/claude-code-chat
-cd claude-code-chat
-npm install
+npm install -g @anthropic-ai/claude-code
+claude --version
+```
 
-Click "F5" to run the extension or access the "Run and Debug" section in VSCode
+### Stop button not working
+The extension uses process group killing. If issues persist:
+```bash
+ps aux | grep claude
+pkill -f claude
+```
+
+### Memory not persisting
+Ensure `.claude/` directory is not in your `.gitignore`
+
+### WSL Issues
+```bash
+wsl --list --verbose
 ```
 
 ---
 
-## 📝 **License**
+## Development
 
-See the [LICENSE](LICENSE) file for details.
+### Building
+```bash
+npm install
+npm run compile
+npm run watch  # For development
+```
+
+### Testing
+```bash
+npm run lint
+npm test
+```
+
+### Packaging
+```bash
+npx vsce package --no-dependencies
+```
 
 ---
 
-## 🙏 **Acknowledgments**
+## Contributing
 
-- **Anthropic** - For creating the amazing Claude AI and more specifically the Claude Code SDK
-- **VS Code Team** - For the incredible extension platform
-- **Our Community** - For feedback, suggestions, and contributions
+Contributions are welcome!
 
----
-
-## 📞 **Support**
-
-Need help? We've got you covered:
-
-- 🐛 **Issues**: [GitHub Issues](https://github.com/andrepimenta/claude-code-chat/issues)
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ---
 
-<div align="center">
+## Credits
 
-**⭐ Star us on GitHub if this project helped you!**
+### Original Project
+- **[claude-code-chat](https://github.com/andrepimenta/claude-code-chat)** by **Andre Pimenta**
+- Thank you for the excellent foundation that made this enhanced version possible!
 
-[**Download Now**](https://marketplace.visualstudio.com/items?itemName=andrepimenta.claude-code-chat)
+### Enhanced Version
+- **Claude CodeUI by NexaLance** by **Developer Jillur**
+- Built with Claude by Anthropic
 
-</div>
+### Research Inspirations
+- Anthropic's Context Engineering Guide
+- Manus AI's context engineering lessons
+- LangChain's agent patterns
+- Mem0's graph-based memory architecture
+- Cursor's Priompt and Shadow Workspace patterns
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Support
+
+- **GitHub Issues**: [Report bugs or request features](https://github.com/developerjillur/claude-codeUI-by-nexalance/issues)
+- **Repository**: [GitHub](https://github.com/developerjillur/claude-codeUI-by-nexalance)
+
+---
+
+**Made with love by [Developer Jillur](https://github.com/developerjillur) | [NexaLance](https://nexalance.com)**
+
+**Star us on GitHub if this project helped you!**
