@@ -17,7 +17,7 @@ export interface WebviewMessageBase {
 /**
  * Plan mode types for different planning approaches
  */
-export type PlanModeType = 'planfast' | 'ask' | 'agent' | 'auto';
+export type PlanModeType = 'planfast' | 'ask' | 'agent' | 'auto' | 'trueplan';
 
 /**
  * Message to send a chat message to Claude

@@ -209,6 +209,8 @@ class ClaudeChatProvider implements vscode.Disposable {
 	private _pendingPermissionResolvers: Map<string, (approved: boolean) => void> | undefined;
 	private _currentConversation: Array<{ timestamp: string, messageType: string, data: any }> = [];
 	private _conversationStartTime: string | undefined;
+	private _lastResponseHadThinking: boolean = false;
+	private _conversationContext: Array<{role: 'user' | 'assistant', content: string}> = [];
 	private _conversationIndex: Array<{
 		filename: string,
 		sessionId: string,
@@ -1346,6 +1348,13 @@ class ClaudeChatProvider implements vscode.Disposable {
 
 		// Prepend mode instructions if enabled
 		let actualMessage = processedMessage;
+
+		// Track user message for context preservation (used when resuming after thinking blocks fails)
+		this._conversationContext.push({
+			role: 'user',
+			content: processedMessage
+		});
+
 		if (planMode) {
 			// Get the specific plan mode type (planfast, ask, or agent)
 			const planType = planModeType || 'ask';
@@ -1383,6 +1392,11 @@ You are in AutoMode. First, create a detailed implementation plan that will be a
 IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happen automatically in the next phase.
 
 `;
+					break;
+				case 'trueplan':
+					// Native plan mode - no prompt injection needed
+					// The --permission-mode plan CLI flag enforces read-only behavior
+					planPrompt = '';
 					break;
 				default:
 					planPrompt = 'PLAN FIRST FOR THIS MESSAGE ONLY: Plan first before making any changes. Show me in detail what you will change and wait for my explicit approval in a separate message before proceeding. Do not implement anything until I confirm. This planning requirement applies ONLY to this current message.\n\n';
@@ -1459,9 +1473,12 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 		const maxTokens = config.get<number>('model.maxTokens', 16384);
 
 		// Handle permission modes
+		// Yolo mode ALWAYS takes priority - user explicitly wants to skip ALL permissions
 		if (yoloMode || permissionMode === 'bypassPermissions') {
-			// Yolo mode or bypassPermissions: skip all permissions
 			args.push('--dangerously-skip-permissions');
+		} else if (planMode && planModeType === 'trueplan') {
+			// True Plan mode: read-only analysis (only if Yolo not enabled)
+			args.push('--permission-mode', 'plan');
 		} else if (permissionMode === 'acceptEdits') {
 			// Accept edits mode: auto-approve file modifications
 			args.push('--permission-mode', 'acceptEdits');
@@ -1486,6 +1503,34 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 		// Add model selection if not using default
 		if (this._selectedModel && this._selectedModel !== 'default') {
 			args.push('--model', this._selectedModel);
+		}
+
+		// If last response had thinking blocks, start fresh session with context injection
+		// This avoids the API error: "thinking or redacted_thinking blocks cannot be modified"
+		if (this._lastResponseHadThinking && this._conversationContext.length > 0) {
+			console.log('Previous response had thinking blocks - starting new session with context injection');
+
+			// Build context summary from last few exchanges (max 5 exchanges = 10 messages)
+			const recentContext = this._conversationContext.slice(-10);
+			let contextSummary = '[CONVERSATION CONTEXT - Previous messages from this session]\n';
+
+			for (const msg of recentContext) {
+				const roleLabel = msg.role === 'user' ? 'User' : 'Assistant';
+				// Truncate long messages for context
+				const truncatedContent = msg.content.length > 500
+					? msg.content.substring(0, 500) + '...'
+					: msg.content;
+				contextSummary += `${roleLabel}: ${truncatedContent}\n\n`;
+			}
+
+			contextSummary += '[END CONTEXT]\n\nNow responding to the following new message:\n';
+
+			// Prepend context to the actual message
+			actualMessage = contextSummary + actualMessage;
+
+			// Clear session to force new session
+			this._currentSessionId = undefined;
+			this._lastResponseHadThinking = false;
 		}
 
 		// Add session resume if we have a current session
@@ -1698,11 +1743,24 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 
 							// Track assistant message in context window manager
 							this._trackContextMessage('assistant', content.text.trim());
-						} else if (content.type === 'thinking' && content.thinking.trim()) {
+
+							// Track assistant response for context preservation (used when resuming after thinking blocks fails)
+							const summaryText = content.text.length > 2000
+								? content.text.substring(0, 2000) + '...[truncated]'
+								: content.text;
+							this._conversationContext.push({
+								role: 'assistant',
+								content: summaryText
+							});
+						} else if (content.type === 'thinking' && content.thinking) {
+							// Track that this response had thinking content - used to avoid resume issues
+							this._lastResponseHadThinking = true;
+
 							// Show thinking content and save to conversation
+							// NOTE: Do NOT use .trim() - thinking blocks must be preserved exactly for API
 							this._sendAndSaveMessage({
 								type: 'thinking',
-								data: content.thinking.trim()
+								data: content.thinking
 							});
 						} else if (content.type === 'tool_use') {
 							// Show tool execution with better formatting
@@ -1883,6 +1941,8 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 		// Clear commits and conversation
 		this._commits = [];
 		this._currentConversation = [];
+		this._conversationContext = [];
+		this._lastResponseHadThinking = false;
 
 		// Clear context window manager
 		this._clearContextOnNewSession();

@@ -1085,6 +1085,20 @@ const getHtml = (isTelemetryEnabled: boolean) => `<!DOCTYPE html>
 							<div class="plan-mode-desc">Highest quality output. Creates comprehensive plan first, then automatically executes with full autonomy. Best for complex tasks.</div>
 						</div>
 					</div>
+					<div class="plan-mode-option" id="planMode-trueplan" onclick="selectPlanMode('trueplan')">
+						<div class="plan-mode-radio">
+							<input type="radio" name="planMode" id="radio-trueplan" value="trueplan">
+							<span class="plan-mode-radio-custom"></span>
+						</div>
+						<div class="plan-mode-content">
+							<div class="plan-mode-title">
+								<span class="plan-mode-icon">🔒</span>
+								<span class="plan-mode-name">True Plan</span>
+								<span class="plan-mode-badge trueplan">Native Mode</span>
+							</div>
+							<div class="plan-mode-desc">Uses Claude Code's native plan mode. Claude operates in read-only mode and cannot make any file modifications until you explicitly approve. Same as CLI plan mode.</div>
+						</div>
+					</div>
 				</div>
 				<div class="plan-modal-actions">
 					<button class="confirm-btn" onclick="confirmPlanMode()">Confirm</button>

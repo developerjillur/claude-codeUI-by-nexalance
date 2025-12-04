@@ -3676,6 +3676,11 @@ const styles = `
         color: #10b981;
     }
 
+    .plan-mode-badge.trueplan {
+        background: linear-gradient(135deg, #059669, #10b981);
+        color: #ffffff;
+    }
+
     /* System message for AutoMode */
     .system-message {
         background-color: rgba(16, 185, 129, 0.1);
