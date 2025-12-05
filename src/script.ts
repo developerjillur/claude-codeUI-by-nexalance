@@ -1914,7 +1914,7 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		}
 
 		let memoryRetryCount = 0;
-		const maxMemoryRetries = 3;
+		const maxMemoryRetries = 5;
 
 		function renderMemoryStats(data) {
 			if (!data.initialized) {
@@ -1924,7 +1924,7 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 					document.getElementById('memoryTotalEntities').textContent = '-';
 					document.getElementById('memoryTotalRelations').textContent = '-';
 					document.getElementById('memoryTotalObservations').textContent = '-';
-					document.getElementById('memoryLastUpdated').textContent = 'Initializing... (attempt ' + memoryRetryCount + '/' + maxMemoryRetries + ')';
+					document.getElementById('memoryLastUpdated').textContent = 'Initializing memory... (attempt ' + memoryRetryCount + '/' + maxMemoryRetries + ')';
 					document.getElementById('memoryEntityTypes').innerHTML = '<p style="text-align: center; color: var(--text-muted);">Loading memory system...</p>';
 					// Retry after a delay
 					setTimeout(() => {
@@ -4754,7 +4754,18 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 
 		function showRestoreContainer(data) {
 			const messagesDiv = document.getElementById('messages');
+			if (!messagesDiv) {
+				console.error('showRestoreContainer: messages div not found');
+				return;
+			}
 			const shouldScroll = shouldAutoScroll(messagesDiv);
+
+			// Check if this checkpoint already has a container (avoid duplicates)
+			const existingContainer = document.getElementById(\`restore-\${data.sha}\`);
+			if (existingContainer) {
+				console.log('Restore container already exists for:', data.sha);
+				return;
+			}
 
 			const restoreContainer = document.createElement('div');
 			const isEnhanced = data.enhanced === true;
@@ -4793,7 +4804,24 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				\`;
 			}
 
-			messagesDiv.appendChild(restoreContainer);
+			// Find the last user message and insert restore container right after it
+			// This ensures the restore button appears directly below the user message
+			// instead of at the end of all messages
+			const allUserMessages = messagesDiv.querySelectorAll('.message.user');
+			const lastUserMessage = allUserMessages[allUserMessages.length - 1];
+
+			console.log('showRestoreContainer: found', allUserMessages.length, 'user messages');
+
+			if (lastUserMessage) {
+				// Insert after the user message
+				lastUserMessage.insertAdjacentElement('afterend', restoreContainer);
+				console.log('Restore container inserted after user message');
+			} else {
+				// Fallback: append to end if no user message found
+				messagesDiv.appendChild(restoreContainer);
+				console.log('Restore container appended to end (no user message found)');
+			}
+
 			scrollToBottomIfNeeded(messagesDiv, shouldScroll);
 		}
 

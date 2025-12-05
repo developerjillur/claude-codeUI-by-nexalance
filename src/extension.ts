@@ -316,9 +316,48 @@ class ClaudeChatProvider implements vscode.Disposable {
 		// Load saved model preference
 		this._selectedModel = this._context.workspaceState.get('claude.selectedModel', 'default');
 
+		// Load cumulative stats (cost, tokens) that persist across sessions
+		this._loadCumulativeStats();
+
 		// Resume session from latest conversation
 		const latestConversation = this._getLatestConversation();
 		this._currentSessionId = latestConversation?.sessionId;
+	}
+
+	/**
+	 * Load cumulative stats from workspace state
+	 * Stats accumulate forever across all sessions (never reset)
+	 */
+	private _loadCumulativeStats(): void {
+		const stats = this._context.workspaceState.get<{
+			totalCost: number;
+			totalTokensInput: number;
+			totalTokensOutput: number;
+			totalRequestCount: number;
+			lastUpdated: string;
+		}>('claude.cumulativeStats');
+
+		if (stats) {
+			this._totalCost = stats.totalCost || 0;
+			this._totalTokensInput = stats.totalTokensInput || 0;
+			this._totalTokensOutput = stats.totalTokensOutput || 0;
+			this._requestCount = stats.totalRequestCount || 0;
+			console.log(`Loaded cumulative stats: $${this._totalCost.toFixed(4)}, ${this._totalTokensInput + this._totalTokensOutput} tokens`);
+		}
+	}
+
+	/**
+	 * Save cumulative stats to workspace state
+	 * Called after each API response to persist stats
+	 */
+	private _saveCumulativeStats(): void {
+		this._context.workspaceState.update('claude.cumulativeStats', {
+			totalCost: this._totalCost,
+			totalTokensInput: this._totalTokensInput,
+			totalTokensOutput: this._totalTokensOutput,
+			totalRequestCount: this._requestCount,
+			lastUpdated: new Date().toISOString()
+		});
 	}
 
 	private async _initializeEnhancedCheckpoints(): Promise<void> {
@@ -1912,6 +1951,10 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 							currentTurns: jsonData.num_turns
 						}
 					});
+
+					// Persist cumulative stats to workspace state
+					// Stats accumulate forever across all sessions
+					this._saveCumulativeStats();
 				}
 				break;
 		}
@@ -1948,13 +1991,11 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 		this._clearContextOnNewSession();
 		this._conversationStartTime = undefined;
 
-		// Reset counters
-		this._totalCost = 0;
-		this._totalTokensInput = 0;
-		this._totalTokensOutput = 0;
-		this._requestCount = 0;
+		// NOTE: Cumulative stats (_totalCost, _totalTokensInput, _totalTokensOutput, _requestCount)
+		// are NO LONGER reset here - they accumulate forever across all sessions per user preference
+		// Stats are persisted to workspace state and survive VS Code restarts
 
-		// Reset session token tracking for smart memory
+		// Reset session-specific token tracking for smart memory (these ARE per-session)
 		this._sessionEstimatedTokens = 0;
 		this._sessionMessageCount = 0;
 		this._lastSessionCompaction = null;
@@ -2065,6 +2106,10 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 	}
 
 	private async _createBackupCommit(userMessage: string): Promise<void> {
+		console.log('_createBackupCommit called');
+		console.log(`  Enhanced checkpoints enabled: ${this._useEnhancedCheckpoints}`);
+		console.log(`  Checkpoint manager initialized: ${this._checkpointManager.isInitialized()}`);
+
 		// Use Enhanced Checkpoint Manager if available
 		if (this._useEnhancedCheckpoints && this._checkpointManager.isInitialized()) {
 			try {
@@ -2104,16 +2149,48 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 					console.log(`Enhanced checkpoint created: ${checkpoint.id.substring(0, 12)} - ${checkpoint.message}`);
 					console.log(`Files tracked: ${checkpoint.files.length}`);
 					return;
+				} else {
+					console.log('Enhanced checkpoint returned null, falling back to legacy');
 				}
 			} catch (error: any) {
 				console.error('Enhanced checkpoint failed, falling back to legacy:', error.message);
+				// Don't fall through silently - the legacy system will handle it
 			}
+		} else {
+			// Enhanced checkpoints not enabled or not initialized
+			// Make sure we log this so we know why
+			console.log('Enhanced checkpoints not available, using legacy system');
 		}
 
 		// Legacy checkpoint system (fallback)
 		try {
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			if (!workspaceFolder || !this._backupRepoPath) { return; }
+			console.log(`  Legacy fallback - workspaceFolder: ${!!workspaceFolder}, backupRepoPath: ${!!this._backupRepoPath}`);
+			if (!workspaceFolder || !this._backupRepoPath) {
+				console.warn('Legacy checkpoint skipped: no workspace folder or backup repo path');
+				// Still show a basic restore option even without a real checkpoint
+				// This ensures the UI always shows the restore button
+				const now = new Date();
+				const timestamp = now.toISOString();
+				const commitInfo = {
+					id: `temp-${now.getTime()}`,
+					sha: `temp-${now.getTime()}`,
+					message: `Checkpoint: ${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}`,
+					timestamp: timestamp,
+					fileCount: 0,
+					changedFiles: []
+				};
+				this._commits.push(commitInfo);
+				this._sendAndSaveMessage({
+					type: 'showRestoreOption',
+					data: {
+						...commitInfo,
+						enhanced: true,
+						previewAvailable: false
+					}
+				});
+				return;
+			}
 
 			const workspacePath = workspaceFolder.uri.fsPath;
 			const now = new Date();
@@ -2168,6 +2245,26 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 			console.log(`Created backup commit: ${commitInfo.sha.substring(0, 8)} - ${actualMessage}`);
 		} catch (error: any) {
 			console.error('Failed to create backup commit:', error.message);
+			// Even if backup commit fails, still show restore option in UI
+			// This ensures the user always sees the checkpoint button
+			const now = new Date();
+			const fallbackCommitInfo = {
+				id: `fallback-${now.getTime()}`,
+				sha: `fallback-${now.getTime()}`,
+				message: `Checkpoint: ${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}`,
+				timestamp: now.toISOString(),
+				fileCount: 0,
+				changedFiles: []
+			};
+			this._commits.push(fallbackCommitInfo);
+			this._sendAndSaveMessage({
+				type: 'showRestoreOption',
+				data: {
+					...fallbackCommitInfo,
+					enhanced: true,
+					previewAvailable: false
+				}
+			});
 		}
 	}
 
@@ -2207,6 +2304,16 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 							this._commits = this._commits.slice(0, commitIndex + 1);
 						}
 					}
+
+					// CRITICAL: Clear the current session ID after restore
+					// The old session no longer exists, so we need to start fresh
+					// This prevents "No conversation found with session ID" errors
+					console.log(`Clearing session ID after restore. Old session: ${this._currentSessionId}`);
+					this._currentSessionId = undefined;
+
+					// Also clear conversation context to prevent stale context issues
+					this._conversationContext = [];
+					this._lastResponseHadThinking = false;
 
 					console.log(`Enhanced restore successful: ${result.restoredFiles?.length || 0} files restored`);
 					return;
@@ -2254,6 +2361,16 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 					commitSha: commitSha
 				}
 			});
+
+			// CRITICAL: Clear the current session ID after restore
+			// The old session no longer exists, so we need to start fresh
+			// This prevents "No conversation found with session ID" errors
+			console.log(`Clearing session ID after legacy restore. Old session: ${this._currentSessionId}`);
+			this._currentSessionId = undefined;
+
+			// Also clear conversation context to prevent stale context issues
+			this._conversationContext = [];
+			this._lastResponseHadThinking = false;
 
 		} catch (error: any) {
 			console.error('Failed to restore commit:', error.message);
@@ -2385,6 +2502,16 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 					if (result.backupCheckpointId) {
 						this._checkRestoreBackupAvailable();
 					}
+
+					// CRITICAL: Clear the current session ID after restore
+					// The old session no longer exists, so we need to start fresh
+					// This prevents "No conversation found with session ID" errors
+					console.log(`Clearing session ID after confirm restore. Old session: ${this._currentSessionId}`);
+					this._currentSessionId = undefined;
+
+					// Also clear conversation context to prevent stale context issues
+					this._conversationContext = [];
+					this._lastResponseHadThinking = false;
 
 					console.log(`Enhanced restore successful: ${result.restoredFiles?.length || 0} files restored`);
 					return;
