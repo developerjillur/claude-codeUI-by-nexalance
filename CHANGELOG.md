@@ -6,6 +6,31 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [2.3.0] - 2026-05-23
+
+### Added — Prompt Queue (queued-while-running)
+
+You can now stack follow-up prompts while Claude is still working — no more waiting for the current turn to finish before typing the next one.
+
+- Typing a prompt and pressing Send (or Enter) while Claude is processing now **adds the prompt to a queue** instead of being ignored or interrupting the current run.
+- A new queue panel appears just above the input box, listing every pending prompt with:
+  - **Steer** — submit that prompt immediately (jump the queue, send it now into the running session).
+  - **🗑 Delete** — remove that prompt from the queue without sending.
+  - **Clear all** — empty the entire queue in one click.
+- When Claude finishes the current turn, a **10-second auto-submit countdown** starts; the head of the queue is then sent automatically. The countdown is visible in the panel header (`Auto-submit next in Ns`).
+- Starting a new manual prompt or clicking Stop cancels the countdown.
+- The queue **persists across VS Code restarts** (stored in `context.globalState` under `promptQueue`).
+- AutoMode (Plan First + Auto) is respected — the countdown only fires after AutoMode Phase 2 completes, not between Phase 1 and Phase 2.
+
+### Technical
+
+- New webview ⇄ extension messages: `savePromptQueue`, `getPromptQueue`, `promptQueueData`.
+- New extension methods: `_savePromptQueue`, `_sendPromptQueue` (both in `src/extension.ts`).
+- New webview functions: `enqueuePrompt`, `deletePromptQueueItem`, `steerPromptQueueItem`, `clearPromptQueue`, `renderPromptQueue`, `startQueueCountdown`, `cancelQueueCountdown`, `submitNextFromQueue`, `persistPromptQueue`, `loadPromptQueueFromExtension` (all in `src/script.ts`).
+- New DOM ids/classes: `#promptQueuePanel`, `#promptQueueList`, `#promptQueueCount`, `#promptQueueCountdown`, `.prompt-queue-item`, `.prompt-queue-steer-btn`, `.prompt-queue-delete-btn`.
+
+---
+
 ## [2.2.0] - 2025-12-03
 
 ### Major Documentation & Release Update

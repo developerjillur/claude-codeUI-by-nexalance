@@ -234,6 +234,21 @@ export interface DeleteCustomSnippetMessage extends WebviewMessageBase {
 }
 
 /**
+ * Queued-while-running feature: webview sends the full queue to extension for persistence.
+ */
+export interface SavePromptQueueMessage extends WebviewMessageBase {
+    type: 'savePromptQueue';
+    data: any[];
+}
+
+/**
+ * Queued-while-running feature: webview asks extension for the persisted queue (on init).
+ */
+export interface GetPromptQueueMessage extends WebviewMessageBase {
+    type: 'getPromptQueue';
+}
+
+/**
  * Message to enable YOLO mode
  */
 export interface EnableYoloModeMessage extends WebviewMessageBase {
@@ -602,7 +617,9 @@ export type WebviewMessage =
     | GetSessionHealthMessage
     | ForceNewSessionMessage
     | SaveScratchpadItemsMessage
-    | GetScratchpadItemsMessage;
+    | GetScratchpadItemsMessage
+    | SavePromptQueueMessage
+    | GetPromptQueueMessage;
 
 // ==================== Extension to Webview Message Types ====================
 

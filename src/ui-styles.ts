@@ -7491,6 +7491,188 @@ const styles = `
             width: 100%;
         }
     }
+
+    /* =====================================================
+       Prompt Queue Panel (queued-while-running feature)
+       ===================================================== */
+    .prompt-queue-panel {
+        margin: 0 8px 6px 8px;
+        padding: 6px 8px 8px 8px;
+        border-radius: 10px;
+        background: var(--vscode-editorWidget-background, rgba(35, 35, 38, 0.95));
+        border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+        max-height: 240px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.18);
+        font-size: 12px;
+    }
+
+    .prompt-queue-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 4px 4px 4px;
+        border-bottom: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.06));
+    }
+
+    .prompt-queue-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+        color: var(--vscode-foreground, #d4d4d4);
+        opacity: 0.85;
+    }
+
+    .prompt-queue-icon {
+        opacity: 0.75;
+    }
+
+    .prompt-queue-count {
+        background: var(--vscode-badge-background, #4d4d4d);
+        color: var(--vscode-badge-foreground, #ffffff);
+        border-radius: 10px;
+        padding: 1px 7px;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 14px;
+    }
+
+    .prompt-queue-countdown {
+        flex: 1;
+        text-align: center;
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground, #a0a0a0);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .prompt-queue-countdown.active {
+        color: var(--vscode-charts-orange, #e8a951);
+    }
+
+    .prompt-queue-clear {
+        background: transparent;
+        border: 1px solid var(--vscode-button-border, rgba(255, 255, 255, 0.1));
+        color: var(--vscode-foreground, #d4d4d4);
+        border-radius: 6px;
+        padding: 2px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        opacity: 0.7;
+        transition: opacity 0.15s, background 0.15s;
+    }
+
+    .prompt-queue-clear:hover {
+        opacity: 1;
+        background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+    }
+
+    .prompt-queue-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        overflow-y: auto;
+        max-height: 200px;
+        padding: 2px 0;
+    }
+
+    .prompt-queue-item {
+        display: grid;
+        grid-template-columns: 18px 1fr auto auto;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        border-radius: 7px;
+        background: var(--vscode-input-background, rgba(255, 255, 255, 0.04));
+        border: 1px solid transparent;
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .prompt-queue-item:hover {
+        background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.07));
+        border-color: var(--vscode-focusBorder, rgba(120, 120, 200, 0.25));
+    }
+
+    .prompt-queue-item.next-up {
+        border-color: var(--vscode-charts-orange, rgba(232, 169, 81, 0.6));
+        background: rgba(232, 169, 81, 0.08);
+    }
+
+    .prompt-queue-item-icon {
+        opacity: 0.55;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .prompt-queue-item-text {
+        font-size: 12px;
+        color: var(--vscode-foreground, #d4d4d4);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        opacity: 0.9;
+    }
+
+    .prompt-queue-steer-btn {
+        background: transparent;
+        border: none;
+        color: var(--vscode-foreground, #d4d4d4);
+        font-size: 11px;
+        padding: 3px 8px 3px 6px;
+        border-radius: 5px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        opacity: 0.75;
+        transition: opacity 0.15s, background 0.15s;
+    }
+
+    .prompt-queue-steer-btn:hover {
+        opacity: 1;
+        background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+    }
+
+    .prompt-queue-steer-btn svg {
+        opacity: 0.75;
+    }
+
+    .prompt-queue-delete-btn {
+        background: transparent;
+        border: none;
+        color: var(--vscode-foreground, #d4d4d4);
+        padding: 4px;
+        border-radius: 5px;
+        cursor: pointer;
+        opacity: 0.55;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.15s, background 0.15s, color 0.15s;
+    }
+
+    .prompt-queue-delete-btn:hover {
+        opacity: 1;
+        background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+        color: var(--vscode-errorForeground, #f48771);
+    }
+
+    .prompt-queue-list::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .prompt-queue-list::-webkit-scrollbar-thumb {
+        background: var(--vscode-scrollbarSlider-background, rgba(255, 255, 255, 0.1));
+        border-radius: 3px;
+    }
+
+    .prompt-queue-list::-webkit-scrollbar-thumb:hover {
+        background: var(--vscode-scrollbarSlider-hoverBackground, rgba(255, 255, 255, 0.18));
+    }
 </style>`
 
 export default styles

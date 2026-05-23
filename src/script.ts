@@ -928,24 +928,246 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 
 		function sendMessage() {
 			const text = messageInput.value.trim();
-			if (text) {
-				// Track if this is AutoMode Phase 1
-				if (planModeEnabled && selectedPlanMode === 'auto') {
-					autoModePhase = 'planning';
-					autoModeOriginalMessage = text;
-				}
+			if (!text) { return; }
 
-				vscode.postMessage({
-					type: 'sendMessage',
+			// If Claude is currently working, ENQUEUE the prompt instead of submitting it.
+			// The queue auto-submits one item 10s after the current session completes,
+			// or immediately when the user clicks "Steer".
+			if (isProcessing) {
+				enqueuePrompt({
 					text: text,
 					planMode: planModeEnabled,
 					planModeType: selectedPlanMode,
 					thinkingMode: thinkingModeEnabled
 				});
-
 				messageInput.value = '';
+				// Snap the textarea back to single-row height after enqueue
+				if (typeof messageInput.dispatchEvent === 'function') {
+					try { messageInput.dispatchEvent(new Event('input')); } catch (e) { /* noop */ }
+				}
+				return;
+			}
+
+			// Track if this is AutoMode Phase 1
+			if (planModeEnabled && selectedPlanMode === 'auto') {
+				autoModePhase = 'planning';
+				autoModeOriginalMessage = text;
+			}
+
+			vscode.postMessage({
+				type: 'sendMessage',
+				text: text,
+				planMode: planModeEnabled,
+				planModeType: selectedPlanMode,
+				thinkingMode: thinkingModeEnabled
+			});
+
+			messageInput.value = '';
+		}
+
+		// ============================================================
+		// Prompt Queue Functions (queued-while-running feature)
+		// ============================================================
+
+		function generateQueueItemId() {
+			return 'q_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+		}
+
+		function enqueuePrompt(payload) {
+			const item = {
+				id: generateQueueItemId(),
+				text: payload.text,
+				planMode: !!payload.planMode,
+				planModeType: payload.planModeType || 'ask',
+				thinkingMode: !!payload.thinkingMode,
+				createdAt: Date.now()
+			};
+			promptQueue.push(item);
+			renderPromptQueue();
+			persistPromptQueue();
+		}
+
+		function deletePromptQueueItem(itemId) {
+			const idx = promptQueue.findIndex(function (q) { return q.id === itemId; });
+			if (idx < 0) { return; }
+			promptQueue.splice(idx, 1);
+			renderPromptQueue();
+			persistPromptQueue();
+			// If we just deleted the head item AND a countdown was running, restart it
+			// so the new head gets its own 10s window
+			if (idx === 0 && queueCountdownTimer && promptQueue.length > 0) {
+				cancelQueueCountdown();
+				startQueueCountdown();
+			} else if (promptQueue.length === 0) {
+				cancelQueueCountdown();
 			}
 		}
+
+		function steerPromptQueueItem(itemId) {
+			const idx = promptQueue.findIndex(function (q) { return q.id === itemId; });
+			if (idx < 0) { return; }
+			const item = promptQueue.splice(idx, 1)[0];
+			cancelQueueCountdown();
+			renderPromptQueue();
+			persistPromptQueue();
+			// Steer = submit immediately. If Claude is still running, the user has chosen
+			// to send a follow-up right now; the extension's _handleSendMessage will queue
+			// it server-side (Claude Code CLI processes one prompt at a time per session).
+			doSendQueuedItem(item);
+		}
+
+		function clearPromptQueue() {
+			if (promptQueue.length === 0) { return; }
+			promptQueue = [];
+			cancelQueueCountdown();
+			renderPromptQueue();
+			persistPromptQueue();
+		}
+
+		function doSendQueuedItem(item) {
+			// Apply this item's mode flags before sending so the extension sees the right context
+			planModeEnabled = !!item.planMode;
+			selectedPlanMode = item.planModeType || 'ask';
+			thinkingModeEnabled = !!item.thinkingMode;
+
+			if (planModeEnabled && selectedPlanMode === 'auto') {
+				autoModePhase = 'planning';
+				autoModeOriginalMessage = item.text;
+			}
+
+			vscode.postMessage({
+				type: 'sendMessage',
+				text: item.text,
+				planMode: planModeEnabled,
+				planModeType: selectedPlanMode,
+				thinkingMode: thinkingModeEnabled
+			});
+		}
+
+		function escapeHtmlForQueue(str) {
+			if (str == null) { return ''; }
+			return String(str)
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;')
+				.replace(/"/g, '&quot;')
+				.replace(/'/g, '&#39;');
+		}
+
+		function renderPromptQueue() {
+			const panel = document.getElementById('promptQueuePanel');
+			const list = document.getElementById('promptQueueList');
+			const countEl = document.getElementById('promptQueueCount');
+			if (!panel || !list || !countEl) { return; }
+
+			countEl.textContent = String(promptQueue.length);
+
+			if (promptQueue.length === 0) {
+				panel.style.display = 'none';
+				list.innerHTML = '';
+				return;
+			}
+
+			panel.style.display = 'flex';
+
+			const rows = promptQueue.map(function (item, index) {
+				const preview = item.text.length > 140 ? item.text.substring(0, 140) + '…' : item.text;
+				const isNextUp = index === 0;
+				const fullText = escapeHtmlForQueue(item.text);
+				const previewSafe = escapeHtmlForQueue(preview);
+				return (
+					'<div class="prompt-queue-item' + (isNextUp ? ' next-up' : '') + '" data-id="' + item.id + '" title="' + fullText + '">' +
+						'<span class="prompt-queue-item-icon">' +
+							'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+								'<polyline points="9 14 4 9 9 4"></polyline>' +
+								'<path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>' +
+							'</svg>' +
+						'</span>' +
+						'<span class="prompt-queue-item-text">' + previewSafe + '</span>' +
+						'<button class="prompt-queue-steer-btn" onclick="steerPromptQueueItem(\\'' + item.id + '\\')" title="Submit this prompt immediately">' +
+							'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+								'<polyline points="15 10 20 15 15 20"></polyline>' +
+								'<path d="M4 4v7a4 4 0 0 0 4 4h12"></path>' +
+							'</svg>' +
+							'<span>Steer</span>' +
+						'</button>' +
+						'<button class="prompt-queue-delete-btn" onclick="deletePromptQueueItem(\\'' + item.id + '\\')" title="Remove from queue">' +
+							'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+								'<polyline points="3 6 5 6 21 6"></polyline>' +
+								'<path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path>' +
+								'<path d="M10 11v6"></path>' +
+								'<path d="M14 11v6"></path>' +
+								'<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>' +
+							'</svg>' +
+						'</button>' +
+					'</div>'
+				);
+			}).join('');
+
+			list.innerHTML = rows;
+		}
+
+		function startQueueCountdown() {
+			cancelQueueCountdown();
+			if (promptQueue.length === 0) { return; }
+			queueCountdownEndsAt = Date.now() + QUEUE_AUTOSUBMIT_DELAY_MS;
+			updateQueueCountdownDisplay();
+			queueCountdownTimer = setInterval(function () {
+				const remaining = queueCountdownEndsAt - Date.now();
+				if (remaining <= 0) {
+					cancelQueueCountdown();
+					submitNextFromQueue();
+				} else {
+					updateQueueCountdownDisplay();
+				}
+			}, 200);
+		}
+
+		function cancelQueueCountdown() {
+			if (queueCountdownTimer) {
+				clearInterval(queueCountdownTimer);
+				queueCountdownTimer = null;
+			}
+			queueCountdownEndsAt = null;
+			updateQueueCountdownDisplay();
+		}
+
+		function updateQueueCountdownDisplay() {
+			const el = document.getElementById('promptQueueCountdown');
+			if (!el) { return; }
+			if (queueCountdownEndsAt) {
+				const secs = Math.max(0, Math.ceil((queueCountdownEndsAt - Date.now()) / 1000));
+				el.textContent = 'Auto-submit next in ' + secs + 's';
+				el.classList.add('active');
+			} else {
+				el.textContent = '';
+				el.classList.remove('active');
+			}
+		}
+
+		function submitNextFromQueue() {
+			if (promptQueue.length === 0) { return; }
+			const item = promptQueue.shift();
+			renderPromptQueue();
+			persistPromptQueue();
+			doSendQueuedItem(item);
+		}
+
+		function persistPromptQueue() {
+			vscode.postMessage({
+				type: 'savePromptQueue',
+				data: promptQueue
+			});
+		}
+
+		function loadPromptQueueFromExtension() {
+			vscode.postMessage({ type: 'getPromptQueue' });
+		}
+
+		// expose queue handlers globally (inline onclick handlers need them on window)
+		window.steerPromptQueueItem = steerPromptQueueItem;
+		window.deletePromptQueueItem = deletePromptQueueItem;
+		window.clearPromptQueue = clearPromptQueue;
 
 		function togglePlanMode() {
 			planModeEnabled = !planModeEnabled;
@@ -1104,6 +1326,15 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		let isProcessing = false;
 		let requestStartTime = null;
 		let requestTimer = null;
+
+		// ============================================================
+		// Prompt Queue State (queued-while-running feature)
+		// ============================================================
+		// Each item: { id, text, planMode, planModeType, thinkingMode, createdAt }
+		let promptQueue = [];
+		let queueCountdownTimer = null;
+		let queueCountdownEndsAt = null;
+		const QUEUE_AUTOSUBMIT_DELAY_MS = 10000;
 
 		// Send usage statistics
 		function sendStats(eventName) {
@@ -3900,6 +4131,8 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 				case 'ready':
 					addMessage(message.data, 'system');
 					updateStatusWithTotals();
+					// Ask extension for any queue items persisted across reloads
+					loadPromptQueueFromExtension();
 					break;
 					
 				case 'restoreInputText':
@@ -3960,6 +4193,8 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 						startRequestTimer(message.data.requestStartTime);
 						showStopButton();
 						disableButtons();
+						// A new session is starting — cancel any pending queue countdown
+						cancelQueueCountdown();
 					} else {
 						stopRequestTimer();
 
@@ -3975,13 +4210,33 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 							enableButtons();
 							autoModePhase = 'idle';
 							autoModeOriginalMessage = '';
+							// AutoMode is done — if the user queued anything during it, start countdown
+							if (promptQueue.length > 0) {
+								startQueueCountdown();
+							}
 						} else {
 							// Normal (non-AutoMode) completion
 							hideStopButton();
 							enableButtons();
+							// Session finished — start 10s countdown to auto-submit next queued prompt
+							if (promptQueue.length > 0) {
+								startQueueCountdown();
+							}
 						}
 					}
 					updateStatusWithTotals();
+					break;
+
+				case 'promptQueueData':
+					// Restored from globalState on init
+					if (Array.isArray(message.data)) {
+						promptQueue = message.data;
+						renderPromptQueue();
+						// If we restored a non-empty queue while NOT processing, start countdown
+						if (!isProcessing && promptQueue.length > 0) {
+							startQueueCountdown();
+						}
+					}
 					break;
 					
 				case 'clearLoading':

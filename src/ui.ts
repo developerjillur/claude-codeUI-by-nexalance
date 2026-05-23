@@ -82,6 +82,24 @@ const getHtml = (isTelemetryEnabled: boolean) => `<!DOCTYPE html>
 		</div>
 		
 		<div class="input-resize-handle" id="inputResizeHandle"></div>
+
+		<!-- Prompt Queue Panel: shown above input while Claude is running and queue has items -->
+		<div class="prompt-queue-panel" id="promptQueuePanel" style="display: none;">
+			<div class="prompt-queue-header">
+				<span class="prompt-queue-title">
+					<svg class="prompt-queue-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="12" cy="12" r="10"></circle>
+						<polyline points="12 6 12 12 16 14"></polyline>
+					</svg>
+					<span>Queued</span>
+					<span class="prompt-queue-count" id="promptQueueCount">0</span>
+				</span>
+				<span class="prompt-queue-countdown" id="promptQueueCountdown"></span>
+				<button class="prompt-queue-clear" id="promptQueueClearBtn" onclick="clearPromptQueue()" title="Clear all queued prompts">Clear all</button>
+			</div>
+			<div class="prompt-queue-list" id="promptQueueList"></div>
+		</div>
+
 		<div class="input-container" id="inputContainer">
 			<div class="input-modes">
 				<div class="mode-toggle">

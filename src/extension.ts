@@ -982,6 +982,12 @@ class ClaudeChatProvider implements vscode.Disposable {
 			case 'deleteCustomSnippet':
 				this._deleteCustomSnippet(message.snippetId);
 				return;
+			case 'savePromptQueue':
+				this._savePromptQueue(message.data);
+				return;
+			case 'getPromptQueue':
+				this._sendPromptQueue();
+				return;
 			case 'enableYoloMode':
 				this._enableYoloMode();
 				return;
@@ -3452,6 +3458,35 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 			this._postMessage({
 				type: 'error',
 				data: 'Failed to delete custom snippet'
+			});
+		}
+	}
+
+	// ============================================================
+	// Prompt Queue persistence (queued-while-running feature)
+	// ============================================================
+
+	private async _savePromptQueue(queue: any[]): Promise<void> {
+		try {
+			const safeQueue = Array.isArray(queue) ? queue : [];
+			await this._context.globalState.update('promptQueue', safeQueue);
+		} catch (error) {
+			console.error('Error saving prompt queue:', error);
+		}
+	}
+
+	private _sendPromptQueue(): void {
+		try {
+			const queue = this._context.globalState.get<any[]>('promptQueue', []);
+			this._postMessage({
+				type: 'promptQueueData',
+				data: Array.isArray(queue) ? queue : []
+			});
+		} catch (error) {
+			console.error('Error loading prompt queue:', error);
+			this._postMessage({
+				type: 'promptQueueData',
+				data: []
 			});
 		}
 	}
