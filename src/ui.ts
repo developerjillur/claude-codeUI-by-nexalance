@@ -95,6 +95,10 @@ const getHtml = (isTelemetryEnabled: boolean) => `<!DOCTYPE html>
 					<span class="prompt-queue-count" id="promptQueueCount">0</span>
 				</span>
 				<span class="prompt-queue-countdown" id="promptQueueCountdown"></span>
+				<button class="prompt-queue-pause" id="promptQueuePauseBtn" onclick="togglePromptQueuePause()" title="Pause auto-submit (countdown will not fire)">
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+					<span>Pause</span>
+				</button>
 				<button class="prompt-queue-clear" id="promptQueueClearBtn" onclick="clearPromptQueue()" title="Clear all queued prompts">Clear all</button>
 			</div>
 			<div class="prompt-queue-list" id="promptQueueList"></div>

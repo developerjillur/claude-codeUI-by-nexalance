@@ -974,6 +974,10 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		}
 
 		function enqueuePrompt(payload) {
+			if (promptQueue.length >= QUEUE_MAX_ITEMS) {
+				addMessage('Queue is full (' + QUEUE_MAX_ITEMS + ' items max). Delete some items first.', 'system');
+				return;
+			}
 			const item = {
 				id: generateQueueItemId(),
 				text: payload.text,
@@ -1006,14 +1010,25 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		function steerPromptQueueItem(itemId) {
 			const idx = promptQueue.findIndex(function (q) { return q.id === itemId; });
 			if (idx < 0) { return; }
+			// Move the item to the head of the queue (don't remove it yet)
 			const item = promptQueue.splice(idx, 1)[0];
-			cancelQueueCountdown();
-			renderPromptQueue();
-			persistPromptQueue();
-			// Steer = submit immediately. If Claude is still running, the user has chosen
-			// to send a follow-up right now; the extension's _handleSendMessage will queue
-			// it server-side (Claude Code CLI processes one prompt at a time per session).
-			doSendQueuedItem(item);
+			promptQueue.unshift(item);
+
+			if (isProcessing) {
+				// Claude is still working — sending another sendMessage now would spawn a
+				// parallel Claude process (extension has no guard). Instead, mark this item
+				// to fire INSTANTLY (skipping the 10s wait) the moment the current turn ends.
+				queueSkipNextCountdown = true;
+				cancelQueueCountdown();
+				renderPromptQueue();
+				persistPromptQueue();
+			} else {
+				// Claude is idle — send immediately, no wait
+				cancelQueueCountdown();
+				renderPromptQueue();
+				persistPromptQueue();
+				submitNextFromQueue();
+			}
 		}
 
 		function clearPromptQueue() {
@@ -1025,12 +1040,12 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		}
 
 		function doSendQueuedItem(item) {
-			// Apply this item's mode flags before sending so the extension sees the right context
-			planModeEnabled = !!item.planMode;
-			selectedPlanMode = item.planModeType || 'ask';
-			thinkingModeEnabled = !!item.thinkingMode;
-
-			if (planModeEnabled && selectedPlanMode === 'auto') {
+			// Send with the item's stored flags WITHOUT mutating the live UI toggles —
+			// the user may have changed plan/thinking modes after queueing this item
+			// and we don't want to flip their visible toggles back behind their back.
+			// Special case: AutoMode tracks phase via a global, so we only touch it
+			// if this queued item is actually AutoMode-bound.
+			if (item.planMode && item.planModeType === 'auto') {
 				autoModePhase = 'planning';
 				autoModeOriginalMessage = item.text;
 			}
@@ -1038,9 +1053,9 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			vscode.postMessage({
 				type: 'sendMessage',
 				text: item.text,
-				planMode: planModeEnabled,
-				planModeType: selectedPlanMode,
-				thinkingMode: thinkingModeEnabled
+				planMode: !!item.planMode,
+				planModeType: item.planModeType || 'ask',
+				thinkingMode: !!item.thinkingMode
 			});
 		}
 
@@ -1073,10 +1088,31 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			const rows = promptQueue.map(function (item, index) {
 				const preview = item.text.length > 140 ? item.text.substring(0, 140) + '…' : item.text;
 				const isNextUp = index === 0;
+				const isSteered = isNextUp && queueSkipNextCountdown;
 				const fullText = escapeHtmlForQueue(item.text);
 				const previewSafe = escapeHtmlForQueue(preview);
+
+				// Mode badges (small chips showing what flags this item carries)
+				let badges = '';
+				if (item.planMode) {
+					const planLabel = (item.planModeType || 'ask').toString();
+					const planShort = planLabel === 'planfast' ? 'Plan Fast'
+						: planLabel === 'ask' ? 'Ask'
+						: planLabel === 'agent' ? 'Agent'
+						: planLabel === 'auto' ? 'Auto'
+						: 'Plan';
+					badges += '<span class="prompt-queue-badge badge-plan" title="Plan mode: ' + escapeHtmlForQueue(planShort) + '">' + escapeHtmlForQueue(planShort) + '</span>';
+				}
+				if (item.thinkingMode) {
+					badges += '<span class="prompt-queue-badge badge-think" title="Thinking mode on">Think</span>';
+				}
+
+				const rowClasses = 'prompt-queue-item' +
+					(isNextUp ? ' next-up' : '') +
+					(isSteered ? ' steered' : '');
+
 				return (
-					'<div class="prompt-queue-item' + (isNextUp ? ' next-up' : '') + '" data-id="' + item.id + '" title="' + fullText + '">' +
+					'<div class="' + rowClasses + '" data-id="' + item.id + '" title="' + fullText + '">' +
 						'<span class="prompt-queue-item-icon">' +
 							'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
 								'<polyline points="9 14 4 9 9 4"></polyline>' +
@@ -1084,7 +1120,14 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 							'</svg>' +
 						'</span>' +
 						'<span class="prompt-queue-item-text">' + previewSafe + '</span>' +
-						'<button class="prompt-queue-steer-btn" onclick="steerPromptQueueItem(\\'' + item.id + '\\')" title="Submit this prompt immediately">' +
+						'<span class="prompt-queue-badges">' + badges + '</span>' +
+						'<button class="prompt-queue-edit-btn" onclick="editPromptQueueItem(\\'' + item.id + '\\')" title="Edit this queued prompt">' +
+							'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+								'<path d="M12 20h9"></path>' +
+								'<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>' +
+							'</svg>' +
+						'</button>' +
+						'<button class="prompt-queue-steer-btn" onclick="steerPromptQueueItem(\\'' + item.id + '\\')" title="Send this prompt next (skip wait)">' +
 							'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
 								'<polyline points="15 10 20 15 15 20"></polyline>' +
 								'<path d="M4 4v7a4 4 0 0 0 4 4h12"></path>' +
@@ -1105,6 +1148,68 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			}).join('');
 
 			list.innerHTML = rows;
+			updateQueueCountdownDisplay();
+			updateQueuePauseButtonDisplay();
+		}
+
+		function editPromptQueueItem(itemId) {
+			const idx = promptQueue.findIndex(function (q) { return q.id === itemId; });
+			if (idx < 0) { return; }
+			const item = promptQueue[idx];
+
+			// If the textarea already has content, queue it first so we don't lose it
+			const current = messageInput.value.trim();
+			if (current) {
+				enqueuePrompt({
+					text: current,
+					planMode: planModeEnabled,
+					planModeType: selectedPlanMode,
+					thinkingMode: thinkingModeEnabled
+				});
+			}
+
+			// Load the queued item into the input
+			messageInput.value = item.text;
+			messageInput.focus();
+			try {
+				messageInput.style.height = 'auto';
+				messageInput.style.height = Math.min(messageInput.scrollHeight, 200) + 'px';
+			} catch (e) { /* noop */ }
+
+			// Remove from queue (will be re-queued or sent when user submits)
+			promptQueue.splice(idx, 1);
+			if (idx === 0) {
+				// Head changed — invalidate any pending Steer flag
+				queueSkipNextCountdown = false;
+				cancelQueueCountdown();
+			}
+			renderPromptQueue();
+			persistPromptQueue();
+		}
+
+		function togglePromptQueuePause() {
+			queuePaused = !queuePaused;
+			if (queuePaused) {
+				cancelQueueCountdown();
+			} else if (!isProcessing && promptQueue.length > 0) {
+				startQueueCountdown();
+			}
+			updateQueuePauseButtonDisplay();
+			updateQueueCountdownDisplay();
+		}
+
+		function updateQueuePauseButtonDisplay() {
+			const btn = document.getElementById('promptQueuePauseBtn');
+			if (!btn) { return; }
+			if (queuePaused) {
+				btn.classList.add('paused');
+				btn.title = 'Resume auto-submit';
+				btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Resume</span>';
+			} else {
+				btn.classList.remove('paused');
+				btn.title = 'Pause auto-submit (countdown will not fire)';
+				btn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg><span>Pause</span>';
+			}
 		}
 
 		function startQueueCountdown() {
@@ -1148,9 +1253,32 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		function submitNextFromQueue() {
 			if (promptQueue.length === 0) { return; }
 			const item = promptQueue.shift();
+			// The head item is consumed — any pending Steer flag now applies to the
+			// (new) head, not this one. Reset the flag.
+			queueSkipNextCountdown = false;
 			renderPromptQueue();
 			persistPromptQueue();
 			doSendQueuedItem(item);
+		}
+
+		function maybeStartQueueAfterCompletion() {
+			if (promptQueue.length === 0) { return; }
+			if (queueSuppressNextStart) {
+				// User clicked Stop — honor that, don't kick off the queue
+				queueSuppressNextStart = false;
+				return;
+			}
+			if (queueSkipNextCountdown) {
+				// User clicked Steer mid-stream — send immediately, no 10s wait
+				queueSkipNextCountdown = false;
+				submitNextFromQueue();
+				return;
+			}
+			if (queuePaused) {
+				// User has the queue paused — do nothing
+				return;
+			}
+			startQueueCountdown();
 		}
 
 		function persistPromptQueue() {
@@ -1168,6 +1296,8 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		window.steerPromptQueueItem = steerPromptQueueItem;
 		window.deletePromptQueueItem = deletePromptQueueItem;
 		window.clearPromptQueue = clearPromptQueue;
+		window.editPromptQueueItem = editPromptQueueItem;
+		window.togglePromptQueuePause = togglePromptQueuePause;
 
 		function togglePlanMode() {
 			planModeEnabled = !planModeEnabled;
@@ -1334,7 +1464,12 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 		let promptQueue = [];
 		let queueCountdownTimer = null;
 		let queueCountdownEndsAt = null;
+		let queueSkipNextCountdown = false; // set true when user clicks Steer mid-stream
+		let queueSuppressNextStart = false; // set true when user clicks Stop manually
+		let queuePaused = false; // user pause toggle for countdown
+		let queueRestoredAt = 0; // ms timestamp of last restore from extension (to detect freshly-restored queue)
 		const QUEUE_AUTOSUBMIT_DELAY_MS = 10000;
+		const QUEUE_MAX_ITEMS = 25;
 
 		// Send usage statistics
 		function sendStats(eventName) {
@@ -3924,6 +4059,12 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 			// Reset AutoMode state on manual stop
 			autoModePhase = 'idle';
 			autoModeOriginalMessage = '';
+
+			// User explicitly stopped — don't kick off the queue countdown when
+			// setProcessing(false) arrives. They can still Steer manually.
+			queueSuppressNextStart = true;
+			queueSkipNextCountdown = false;
+			cancelQueueCountdown();
 		}
 
 		// Disable/enable buttons during processing
@@ -4195,6 +4336,8 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 						disableButtons();
 						// A new session is starting — cancel any pending queue countdown
 						cancelQueueCountdown();
+						// A new send clears any prior manual-stop suppression
+						queueSuppressNextStart = false;
 					} else {
 						stopRequestTimer();
 
@@ -4210,32 +4353,27 @@ const getScript = (isTelemetryEnabled: boolean) => `<script>
 							enableButtons();
 							autoModePhase = 'idle';
 							autoModeOriginalMessage = '';
-							// AutoMode is done — if the user queued anything during it, start countdown
-							if (promptQueue.length > 0) {
-								startQueueCountdown();
-							}
+							maybeStartQueueAfterCompletion();
 						} else {
 							// Normal (non-AutoMode) completion
 							hideStopButton();
 							enableButtons();
-							// Session finished — start 10s countdown to auto-submit next queued prompt
-							if (promptQueue.length > 0) {
-								startQueueCountdown();
-							}
+							maybeStartQueueAfterCompletion();
 						}
 					}
 					updateStatusWithTotals();
 					break;
 
 				case 'promptQueueData':
-					// Restored from globalState on init
+					// Restored from workspaceState on webview init.
+					// We intentionally do NOT auto-start the countdown — the user may have
+					// closed VS Code yesterday and we don't want stale prompts firing
+					// the second they reopen. Show the queue; the next natural completion
+					// or a Steer click will pick up the items.
 					if (Array.isArray(message.data)) {
 						promptQueue = message.data;
+						queueRestoredAt = Date.now();
 						renderPromptQueue();
-						// If we restored a non-empty queue while NOT processing, start countdown
-						if (!isProcessing && promptQueue.length > 0) {
-							startQueueCountdown();
-						}
 					}
 					break;
 					

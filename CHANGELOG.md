@@ -6,6 +6,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [2.3.1] - 2026-05-23
+
+### Fixed & Enhanced — Prompt Queue
+
+Audit pass on the v2.3.0 queue. Two safety bugs fixed and several UX gaps closed.
+
+**Bug fixes (safety):**
+- **Steer no longer spawns a parallel Claude process.** v2.3.0 sent the queued prompt directly even mid-stream; the extension's `_sendMessageToClaude` has no in-flight guard, so a second `claude` child process would be spawned and the first orphaned. Steer now moves the item to the head of the queue and fires it the instant the current turn ends (skipping the 10s wait).
+- **Manual Stop no longer triggers the auto-submit countdown.** Previously clicking Stop posted `setProcessing(false)`, which my listener treated like a normal completion and started the 10s timer on the next queued item. Stop now suppresses the next countdown start.
+
+**Correctness:**
+- Queued items submit with **their own** stored mode flags (plan/thinking) instead of mutating the live UI toggles when they auto-fire.
+- Queue persistence moved from `globalState` (one queue shared across every VS Code window) to `workspaceState` (one queue per project). Includes a one-time migration so existing 2.3.0 queues are not lost.
+- Restored queue after VS Code restart **no longer auto-fires** — items are visible but wait for the next natural completion or a Steer click.
+
+**UX additions:**
+- **Edit button** on each queued item — loads the prompt into the textarea for editing (auto-queueing whatever is currently typed so nothing is lost).
+- **Pause / Resume button** in the panel header — stops the countdown until you resume.
+- **Mode badges** on each queued row showing plan mode (Ask / Plan Fast / Agent / Auto) and Thinking flag.
+- **Steered indicator** — the head item glows green and pulses when Steer was clicked mid-stream, so you can see what's coming next.
+- **Queue capped at 25 items** to keep things bounded.
+
+---
+
 ## [2.3.0] - 2026-05-23
 
 ### Added — Prompt Queue (queued-while-running)

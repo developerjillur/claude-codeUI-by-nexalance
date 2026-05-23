@@ -3469,7 +3469,11 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 	private async _savePromptQueue(queue: any[]): Promise<void> {
 		try {
 			const safeQueue = Array.isArray(queue) ? queue : [];
-			await this._context.globalState.update('promptQueue', safeQueue);
+			// Use workspaceState so each project gets its own queue (instead of a
+			// single global queue shared across every VS Code window). Cap at 25
+			// items to keep storage bounded.
+			const capped = safeQueue.slice(0, 25);
+			await this._context.workspaceState.update('promptQueue', capped);
 		} catch (error) {
 			console.error('Error saving prompt queue:', error);
 		}
@@ -3477,7 +3481,17 @@ IMPORTANT: Present ONLY the plan. Do NOT implement yet. The execution will happe
 
 	private _sendPromptQueue(): void {
 		try {
-			const queue = this._context.globalState.get<any[]>('promptQueue', []);
+			let queue = this._context.workspaceState.get<any[]>('promptQueue', []);
+			// One-time migration: if a queue exists in the old globalState slot but
+			// not in workspaceState, lift it over so v2.3.0 users don't lose items.
+			if ((!queue || queue.length === 0)) {
+				const legacy = this._context.globalState.get<any[]>('promptQueue', []);
+				if (Array.isArray(legacy) && legacy.length > 0) {
+					queue = legacy;
+					this._context.workspaceState.update('promptQueue', legacy);
+					this._context.globalState.update('promptQueue', undefined);
+				}
+			}
 			this._postMessage({
 				type: 'promptQueueData',
 				data: Array.isArray(queue) ? queue : []
